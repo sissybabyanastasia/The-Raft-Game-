@@ -24,6 +24,8 @@ interface CardPlayModalProps {
   currentPhase: 'scavenge' | 'resolution' | 'ledger';
   currentLabor?: number;
   currentClaimedLabor?: number;
+  isWindowActive?: boolean;
+  hasPlayedCardThisRound?: boolean;
   isLoading: boolean;
 }
 
@@ -37,6 +39,8 @@ export const CardPlayModal: React.FC<CardPlayModalProps> = ({
   currentPhase,
   currentLabor = 0,
   currentClaimedLabor = 0,
+  isWindowActive = true,
+  hasPlayedCardThisRound = false,
   isLoading,
 }) => {
   if (!isOpen || !cardId) return null;
@@ -46,18 +50,30 @@ export const CardPlayModal: React.FC<CardPlayModalProps> = ({
 
   const [selectedTargetId, setSelectedTargetId] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const playerStash = profile?.stash || 0;
   const hasEnoughStash = playerStash >= card.costStash;
   const isPhaseValid =
     (card.timing === 'scavenge' && currentPhase === 'scavenge') ||
-    (card.timing === 'resolution' && currentPhase === 'resolution');
+    (card.timing === 'resolution' && currentPhase === 'resolution' && isWindowActive);
 
   // Saint validation
   const isSaintValid = cardId !== 'saint' || currentLabor >= currentClaimedLabor;
 
   const handleConfirm = async () => {
+    if (isSubmitting || isLoading) return;
     setError(null);
+
+    if (hasPlayedCardThisRound) {
+      setError('You have already played a Scheme card for this round.');
+      return;
+    }
+    if (currentPhase === 'resolution' && !isWindowActive) {
+      setError('The resolution window has closed. The overnight tally is underway.');
+      setTimeout(() => onClose(), 1500);
+      return;
+    }
     if (!isPhaseValid) {
       setError(`This card must be played during the ${card.timing.toUpperCase()} phase.`);
       return;
@@ -75,11 +91,30 @@ export const CardPlayModal: React.FC<CardPlayModalProps> = ({
       return;
     }
 
+    setIsSubmitting(true);
     try {
       await onConfirmPlay(cardId, selectedTargetId || undefined);
       onClose();
     } catch (err: any) {
-      setError(err.message || 'Failed to play card.');
+      const errMsg = err.message || 'Failed to play card.';
+      if (
+        errMsg.toLowerCase().includes('at most 1') ||
+        errMsg.toLowerCase().includes('already played')
+      ) {
+        setError('A Scheme card has already been registered for you this round.');
+        setTimeout(() => onClose(), 1600);
+      } else if (
+        errMsg.toLowerCase().includes('closed') ||
+        errMsg.toLowerCase().includes('tally') ||
+        errMsg.toLowerCase().includes('transition')
+      ) {
+        setError('The resolution window has closed. The overnight tally is underway.');
+        setTimeout(() => onClose(), 1600);
+      } else {
+        setError(errMsg);
+      }
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -182,6 +217,22 @@ export const CardPlayModal: React.FC<CardPlayModalProps> = ({
           </div>
         )}
 
+        {/* Has Already Played Card This Round Warning */}
+        {hasPlayedCardThisRound && (
+          <div className="p-2.5 rounded bg-amber-950/60 border border-amber-800/80 text-amber-300 text-xs flex items-center gap-2 my-3">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>You have already played a Scheme card for this round. Island rules permit at most 1 Scheme card per castaway each round.</span>
+          </div>
+        )}
+
+        {/* Window Closed Warning */}
+        {currentPhase === 'resolution' && !isWindowActive && (
+          <div className="p-2.5 rounded bg-amber-950/60 border border-amber-800/80 text-amber-300 text-xs flex items-center gap-2 my-3">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>The resolution window has closed. The overnight tally is underway.</span>
+          </div>
+        )}
+
         {/* Error message */}
         {error && (
           <div className="p-2.5 rounded bg-red-950/60 border border-red-800 text-red-300 text-xs my-3">
@@ -201,10 +252,21 @@ export const CardPlayModal: React.FC<CardPlayModalProps> = ({
           <button
             type="button"
             onClick={handleConfirm}
-            disabled={isLoading || !isPhaseValid || !hasEnoughStash || (cardId === 'saint' && !isSaintValid)}
+            disabled={
+              isSubmitting ||
+              isLoading ||
+              hasPlayedCardThisRound ||
+              !isPhaseValid ||
+              !hasEnoughStash ||
+              (cardId === 'saint' && !isSaintValid)
+            }
             className="flex items-center gap-2 px-5 py-2 rounded text-xs font-bold font-mono bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-slate-950 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg transition-all"
           >
-            {isLoading ? 'Executing...' : 'Confirm & Play Scheme'}
+            {hasPlayedCardThisRound
+              ? '1 Card Max (Played)'
+              : isSubmitting || isLoading
+              ? 'Executing...'
+              : 'Confirm & Play Scheme'}
             <ArrowRight className="w-3.5 h-3.5" />
           </button>
         </div>

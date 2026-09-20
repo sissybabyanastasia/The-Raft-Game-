@@ -236,6 +236,20 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
             )}
           </div>
 
+          {/* Error Banner in Active Lobby */}
+          {error && (
+            <div className="mt-4 p-3 rounded bg-red-950/60 border border-red-800/80 text-xs font-mono text-red-200 flex items-center justify-between">
+              <span>{error}</span>
+              <button
+                type="button"
+                onClick={() => setError(null)}
+                className="text-red-300 hover:text-white text-sm px-2 py-0.5 rounded bg-red-900/40 hover:bg-red-800/60"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
           {/* Action Footer */}
           <div className="pt-6 border-t border-[#1c283c] flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="text-xs font-mono text-slate-500">
@@ -253,8 +267,12 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                 disabled={!canStart || isLoading}
                 className="w-full sm:w-auto px-6 py-3 rounded font-mono font-bold text-sm tracking-wider uppercase bg-[#ea580c] hover:bg-[#c2410c] text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg transition-colors"
               >
-                <Play className="w-4 h-4 fill-white" />
-                Commence Construction
+                {isLoading ? (
+                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <Play className="w-4 h-4 fill-white" />
+                )}
+                {isLoading ? 'Commencing...' : 'Commence Construction'}
               </button>
             )}
           </div>

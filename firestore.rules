@@ -40,6 +40,16 @@ service cloud.firestore {
       match /scorecard/{playerId} {
         allow read, write: if true;
       }
+
+      // Shared scheme card deck state
+      match /deck/{docId} {
+        allow read, write: if true;
+      }
+
+      // Universal subcollection fallback for any nested game documents
+      match /{allSubcollections=**} {
+        allow read, write: if true;
+      }
     }
   }
 }

@@ -137,8 +137,8 @@ export const ScavengePhase: React.FC<ScavengePhaseProps> = ({
         rest,
         claimedLabor,
         auditTargetId: auditTargetId ? auditTargetId : null,
-        playedCardId: selectedScavengeCard || undefined,
-        cardTargetId: cardTargetId || undefined,
+        playedCardId: selectedScavengeCard || null,
+        cardTargetId: cardTargetId || null,
       });
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to submit allocation.');

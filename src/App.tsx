@@ -387,7 +387,17 @@ export default function App() {
       if (!res.ok) throw new Error(data.error || 'Failed to play resolution card');
       return data;
     } catch (err: any) {
-      setError(err.message || 'Error playing scheme card');
+      const msg = err.message || 'Error playing scheme card';
+      // If the resolution window closed while deciding or card limit reached, avoid flashing global banner
+      if (
+        !msg.toLowerCase().includes('closed') &&
+        !msg.toLowerCase().includes('tally') &&
+        !msg.toLowerCase().includes('transition') &&
+        !msg.toLowerCase().includes('at most 1') &&
+        !msg.toLowerCase().includes('already played')
+      ) {
+        setError(msg);
+      }
       throw err;
     } finally {
       setIsLoading(false);
@@ -982,6 +992,13 @@ export default function App() {
     Boolean(currentRoundData?.submittedPlayerIds?.includes(currentUser?.uid)) ||
     Boolean(currentRoundData?.submissions?.[currentUser?.uid]);
 
+  const hasPlayedSchemeThisRound = Boolean(
+    currentUser && (
+      currentRoundData?.cardsPlayed?.some((c) => c.playerId === currentUser.uid) ||
+      Boolean(currentRoundData?.submissions?.[currentUser.uid]?.playedCardId)
+    )
+  );
+
   const submittedCount = currentRoundData?.submittedPlayerIds?.length || 0;
   const isHost = game?.hostId === currentUser?.uid;
 
@@ -1310,6 +1327,7 @@ export default function App() {
             profile={myPrivateProfile}
             otherPlayers={otherPlayers}
             currentPhase={currentPhase}
+            hasPlayedCardThisRound={hasPlayedSchemeThisRound}
             onPlayCard={handlePlayResolutionCard}
             onDiscardCard={handleDiscardCard}
             selectedScavengeCard={selectedScavengeCard}

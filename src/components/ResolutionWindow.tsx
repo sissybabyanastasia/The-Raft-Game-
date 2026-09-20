@@ -32,6 +32,8 @@ interface ResolutionWindowProps {
   isLoading: boolean;
 }
 
+const RESOLUTION_TOTAL_MS = 75000; // 75 seconds (3x standing timer for multi-device review)
+
 export const ResolutionWindow: React.FC<ResolutionWindowProps> = ({
   game,
   roundData,
@@ -42,30 +44,46 @@ export const ResolutionWindow: React.FC<ResolutionWindowProps> = ({
   onFinalize,
   isLoading,
 }) => {
-  const [timeLeftMs, setTimeLeftMs] = useState<number>(10000);
+  const closesAt = roundData?.resolutionWindowClosesAt || Date.now() + RESOLUTION_TOTAL_MS;
+  const [timeLeftMs, setTimeLeftMs] = useState<number>(() => Math.max(0, closesAt - Date.now()));
   const [selectedCardId, setSelectedCardId] = useState<SchemeCardId | null>(null);
 
-  const closesAt = roundData?.resolutionWindowClosesAt || Date.now() + 10000;
+  const isWindowActive =
+    timeLeftMs > 0 &&
+    roundData?.resolutionWindowOpen !== false &&
+    !roundData?.resolved &&
+    !roundData?.resolving;
 
   useEffect(() => {
-    const interval = setInterval(() => {
+    const updateTimer = () => {
       const remaining = Math.max(0, closesAt - Date.now());
       setTimeLeftMs(remaining);
 
       if (remaining <= 0) {
-        clearInterval(interval);
         // Trigger finalize if host or local fallback
-        if (currentPlayer.isHost) {
+        if (
+          currentPlayer.isHost &&
+          roundData?.resolutionWindowOpen !== false &&
+          !roundData?.resolved &&
+          !roundData?.resolving
+        ) {
           onFinalize();
         }
       }
-    }, 100);
+    };
+
+    updateTimer();
+    const interval = setInterval(updateTimer, 100);
 
     return () => clearInterval(interval);
-  }, [closesAt, currentPlayer.isHost, onFinalize]);
+  }, [closesAt, currentPlayer.isHost, onFinalize, roundData?.resolutionWindowOpen, roundData?.resolved, roundData?.resolving]);
 
   const seconds = Math.ceil(timeLeftMs / 1000);
-  const progressPercent = Math.max(0, Math.min(100, (timeLeftMs / 10000) * 100));
+  const formattedTime =
+    seconds >= 60
+      ? `${Math.floor(seconds / 60)}m ${(seconds % 60).toString().padStart(2, '0')}s`
+      : `${seconds}s`;
+  const progressPercent = Math.max(0, Math.min(100, (timeLeftMs / RESOLUTION_TOTAL_MS) * 100));
 
   // Find cards in hand that can be played during Resolution (bribe, sabotage, mutiny)
   const hand = profile?.hand || [];
@@ -75,7 +93,9 @@ export const ResolutionWindow: React.FC<ResolutionWindowProps> = ({
   });
 
   const cardsPlayedThisRound = roundData?.cardsPlayed || [];
-  const hasPlayedCardThisRound = cardsPlayedThisRound.some((c) => c.playerId === currentPlayer.id);
+  const hasPlayedCardThisRound =
+    cardsPlayedThisRound.some((c) => c.playerId === currentPlayer.id) ||
+    Boolean(roundData?.submissions?.[currentPlayer.id]?.playedCardId);
 
   const otherPlayers = players.filter((p) => p.id !== currentPlayer.id);
 
@@ -98,9 +118,17 @@ export const ResolutionWindow: React.FC<ResolutionWindowProps> = ({
         {/* Timer Display */}
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#141e30] border border-[#2b3e5c] text-slate-100 font-mono">
           <Clock className="w-4 h-4 text-amber-400 animate-spin" style={{ animationDuration: '4s' }} />
-          <span className="text-xs text-slate-400">Locking in:</span>
-          <span className={`text-base font-black ${seconds <= 3 ? 'text-rose-400 animate-pulse' : 'text-amber-400'}`}>
-            {seconds}s
+          <span className="text-xs text-slate-400">{isWindowActive ? 'Locking in:' : 'Status:'}</span>
+          <span
+            className={`text-base font-black ${
+              !isWindowActive
+                ? 'text-amber-300 text-xs'
+                : seconds <= 5
+                ? 'text-rose-400 animate-pulse'
+                : 'text-amber-400'
+            }`}
+          >
+            {isWindowActive ? formattedTime : 'Tallies locking in...'}
           </span>
         </div>
       </div>
@@ -181,7 +209,11 @@ export const ResolutionWindow: React.FC<ResolutionWindowProps> = ({
                       disabled={!canPlay || isLoading}
                       className="px-3 py-1.5 rounded text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                     >
-                      Execute
+                      {hasPlayedCardThisRound
+                        ? '1 Card Max'
+                        : isWindowActive
+                        ? 'Execute'
+                        : 'Locked'}
                     </button>
                   </div>
                 </div>
@@ -202,8 +234,8 @@ export const ResolutionWindow: React.FC<ResolutionWindowProps> = ({
           <button
             type="button"
             onClick={onFinalize}
-            disabled={isLoading}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#1b293e] hover:bg-[#253956] text-slate-200 text-xs transition-colors"
+            disabled={isLoading || roundData?.resolving || roundData?.resolved}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#1b293e] hover:bg-[#253956] text-slate-200 text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <span>Skip Timer & Tally Now</span>
             <ArrowRight className="w-3.5 h-3.5" />
@@ -220,6 +252,8 @@ export const ResolutionWindow: React.FC<ResolutionWindowProps> = ({
         otherPlayers={otherPlayers}
         profile={profile}
         currentPhase="resolution"
+        isWindowActive={isWindowActive}
+        hasPlayedCardThisRound={hasPlayedCardThisRound}
         isLoading={isLoading}
       />
     </div>

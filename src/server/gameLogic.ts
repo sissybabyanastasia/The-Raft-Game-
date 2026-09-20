@@ -2,13 +2,58 @@ import { db } from '../lib/firebase.js';
 import {
   doc,
   getDoc,
-  setDoc,
-  updateDoc,
+  setDoc as firestoreSetDoc,
+  updateDoc as firestoreUpdateDoc,
   collection,
   getDocs,
   serverTimestamp,
   addDoc,
 } from 'firebase/firestore';
+
+/**
+ * Strips all `undefined` values from an object or array recursively so that Firestore
+ * will never throw `Unsupported field value: undefined`.
+ */
+export function sanitizeForFirestore<T>(data: T): T {
+  if (data === undefined) {
+    return null as any;
+  }
+  if (data === null || typeof data !== 'object') {
+    return data;
+  }
+  if (
+    typeof (data as any).toMillis === 'function' ||
+    (data as any)._methodName ||
+    data.constructor?.name === 'Timestamp' ||
+    data.constructor?.name?.includes('FieldValue')
+  ) {
+    return data;
+  }
+  if (Array.isArray(data)) {
+    return data
+      .filter((item) => item !== undefined)
+      .map((item) => sanitizeForFirestore(item)) as any;
+  }
+  const cleaned: any = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (value !== undefined) {
+      cleaned[key] = sanitizeForFirestore(value);
+    }
+  }
+  return cleaned;
+}
+
+const setDoc: typeof firestoreSetDoc = ((ref: any, data: any, options?: any) => {
+  const sanitized = sanitizeForFirestore(data);
+  return options !== undefined ? firestoreSetDoc(ref, sanitized, options) : firestoreSetDoc(ref, sanitized);
+}) as any;
+
+const updateDoc: typeof firestoreUpdateDoc = ((ref: any, ...args: any[]) => {
+  if (args.length === 1 && typeof args[0] === 'object' && args[0] !== null) {
+    return firestoreUpdateDoc(ref, sanitizeForFirestore(args[0]));
+  }
+  return (firestoreUpdateDoc as any)(ref, ...args);
+}) as any;
 import {
   generateGMNarration,
   generateLaunchNarration,
@@ -574,17 +619,47 @@ export async function submitAllocation(
     new Set([...(roundData.submittedPlayerIds || []), playerId])
   );
 
-  const cardsPlayed: CardPlayRecord[] = roundData.cardsPlayed || [];
+  const cardsPlayed: CardPlayRecord[] = roundData.cardsPlayed ? [...roundData.cardsPlayed] : [];
   if (playedCardId) {
-    cardsPlayed.push({
+    const playRecord: CardPlayRecord = {
       playerId,
       playerName: playerData.displayName,
       cardId: playedCardId,
-      targetId: cardTargetId || undefined,
       timing: 'scavenge',
       resolved: false,
       timestamp: Date.now(),
-    });
+    };
+    if (cardTargetId) {
+      playRecord.targetId = cardTargetId;
+    }
+    if (!cardsPlayed.some((c) => c.playerId === playerId && c.cardId === playedCardId)) {
+      cardsPlayed.push(playRecord);
+    }
+  }
+
+  // Fetch all players for game context and bot checks
+  const playersRef = collection(db, `games/${gameId}/players`);
+  const allPlayersSnap = await getDocs(playersRef);
+  const allPlayers: any[] = allPlayersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+  // Preserve any scavenge cards played across all submissions in this round
+  for (const [subPlayerId, subRaw] of Object.entries(submissions)) {
+    const sub = subRaw as any;
+    if (
+      sub &&
+      sub.playedCardId &&
+      !cardsPlayed.some((c) => c.playerId === subPlayerId && c.cardId === sub.playedCardId)
+    ) {
+      cardsPlayed.push({
+        playerId: subPlayerId,
+        playerName: (allPlayers.find((p) => p.id === subPlayerId)?.displayName) || 'Castaway',
+        cardId: sub.playedCardId,
+        targetId: sub.cardTargetId || undefined,
+        timing: 'scavenge',
+        resolved: false,
+        timestamp: sub.timestamp || Date.now(),
+      });
+    }
   }
 
   submissions[playerId] = {
@@ -612,11 +687,6 @@ export async function submitAllocation(
     },
     { merge: true }
   );
-
-  // Fetch all players to check completion
-  const playersRef = collection(db, `games/${gameId}/players`);
-  const allPlayersSnap = await getDocs(playersRef);
-  const allPlayers: any[] = allPlayersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
   // Auto-submit for bots if any
   for (const p of allPlayers) {
@@ -656,9 +726,10 @@ export async function submitAllocation(
   );
 
   // If everyone has submitted their Scavenge allocation:
-  // Transition into the 10-second Resolution Window!
+  // Transition into the 75-second Resolution Window (3x standing timer for multi-device testing)!
   if (submittedPlayerIds.length >= allPlayers.length) {
-    const resolutionClosesAt = Date.now() + 10000; // 10 seconds
+    const RESOLUTION_WINDOW_MS = 75000; // 75 seconds (3x standing timer) for castaways to review schemes & targets
+    const resolutionClosesAt = Date.now() + RESOLUTION_WINDOW_MS;
 
     await updateDoc(roundRef, {
       resolutionWindowOpen: true,
@@ -670,14 +741,14 @@ export async function submitAllocation(
       gmNarration: 'The scavenge closes; a tense silence falls over the shore as clandestine bargains stir in the dusk...',
     });
 
-    // Schedule automatic resolution after 10.5 seconds
+    // Schedule automatic resolution after 77 seconds
     setTimeout(async () => {
       try {
         await finalizeResolution(gameId, currentRound);
       } catch (err) {
         console.error('Auto resolution error:', err);
       }
-    }, 10500);
+    }, RESOLUTION_WINDOW_MS + 2000);
   }
 
   return {
@@ -702,7 +773,7 @@ export async function playResolutionCard(
 
   if (gameData.status !== 'active') throw new Error('Game is not currently active.');
   if (gameData.roundPhase !== 'resolution') {
-    throw new Error('Cards of this type may only be played during the Resolution window.');
+    throw new Error('The resolution window has closed and the round has transitioned.');
   }
 
   const currentRound = gameData.round || 1;
@@ -711,14 +782,21 @@ export async function playResolutionCard(
   if (!roundSnap.exists()) throw new Error('Round data not found.');
   const roundData = roundSnap.data();
 
-  // Enforce server-side 10s timer with small network grace
-  if (roundData.resolutionWindowClosesAt && Date.now() > roundData.resolutionWindowClosesAt + 1500) {
+  // If the round has already finished resolving or is in active certification
+  if (roundData.resolved || roundData.resolving) {
+    throw new Error('The resolution window has closed and the overnight tally is underway.');
+  }
+
+  // Enforce server-side timer with generous 8-second grace period for network latency and multi-device testing
+  if (roundData.resolutionWindowClosesAt && Date.now() > roundData.resolutionWindowClosesAt + 8000) {
     throw new Error('The resolution window has closed.');
   }
 
   // Enforce 1 card per round rule
   const existingPlays: CardPlayRecord[] = roundData.cardsPlayed || [];
-  const playerPlayedThisRound = existingPlays.some((c) => c.playerId === playerId);
+  const playerPlayedThisRound =
+    existingPlays.some((c) => c.playerId === playerId) ||
+    Boolean(roundData.submissions?.[playerId]?.playedCardId);
   if (playerPlayedThisRound) {
     throw new Error('A player may play at most 1 Scheme card per round.');
   }
@@ -774,15 +852,18 @@ export async function playResolutionCard(
   await updateDoc(playerRef, { handCount: newHand.length });
   await addCardsToDiscard(gameId, [cardId]);
 
-  existingPlays.push({
+  const resPlayRecord: CardPlayRecord = {
     playerId,
     playerName,
     cardId,
-    targetId,
     timing: 'resolution',
     resolved: false,
     timestamp: Date.now(),
-  });
+  };
+  if (targetId) {
+    resPlayRecord.targetId = targetId;
+  }
+  existingPlays.push(resPlayRecord);
 
   await updateDoc(roundRef, { cardsPlayed: existingPlays });
   await addPrivateLog(gameId, playerId, `You played ${cardDef.name} during the Resolution window.`, currentRound);
@@ -816,14 +897,17 @@ export async function discardCard(gameId: string, playerId: string, cardId: Sche
   return { success: true, hand: newHand };
 }
 
-// Finalize Resolution after the 10-second timer closes
+// Finalize Resolution after the resolution timer closes
 export async function finalizeResolution(gameId: string, roundNumber: number) {
   const roundRef = doc(db, `games/${gameId}/rounds`, roundNumber.toString());
   const roundSnap = await getDoc(roundRef);
   if (!roundSnap.exists()) return;
   const roundData = roundSnap.data();
 
-  if (roundData.resolved) return; // Already resolved
+  if (roundData.resolved || roundData.resolving) return; // Already resolved or currently resolving
+
+  // Mark as resolving and close window immediately to block race condition
+  await updateDoc(roundRef, { resolutionWindowOpen: false, resolving: true });
 
   const gameRef = doc(db, 'games', gameId);
   const gameSnap = await getDoc(gameRef);
@@ -834,9 +918,13 @@ export async function finalizeResolution(gameId: string, roundNumber: number) {
   const allPlayersSnap = await getDocs(playersRef);
   const allPlayers: any[] = allPlayersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-  await updateDoc(roundRef, { resolutionWindowOpen: false });
+  // Re-read latest cardsPlayed in case a card was committed right before locking
+  const latestRoundSnap = await getDoc(roundRef);
+  const latestCardsPlayed: CardPlayRecord[] = latestRoundSnap.exists()
+    ? (latestRoundSnap.data().cardsPlayed || [])
+    : (roundData.cardsPlayed || []);
 
-  await resolveRound(gameId, roundNumber, roundData.submissions || {}, allPlayers, gameData, roundData.cardsPlayed || []);
+  await resolveRound(gameId, roundNumber, roundData.submissions || {}, allPlayers, gameData, latestCardsPlayed);
 }
 
 export async function resolveRound(
@@ -1068,17 +1156,20 @@ export async function resolveRound(
             auditRepDelta[player.id] = (auditRepDelta[player.id] || 0) - 3;
           }
 
-          audits.push({
+          const noDataAudit: AuditRecord = {
             auditorId: player.id,
             auditorName: player.displayName,
             targetId: targetPlayer.id,
             targetName: targetPlayer.displayName,
             result: 'no_data',
             repChanges: auditRepDelta,
-            redirectedFromId: wasRedirected ? sub.auditTargetId : undefined,
-            redirectedFromName: wasRedirected ? originalTargetName : undefined,
             timestamp: Date.now(),
-          });
+          };
+          if (wasRedirected) {
+            noDataAudit.redirectedFromId = sub.auditTargetId || '';
+            noDataAudit.redirectedFromName = originalTargetName || '';
+          }
+          audits.push(noDataAudit);
         } else if (targetClaimed > targetActual) {
           // LIAR CAUGHT!
           const targetPenalty = -4;
@@ -1090,7 +1181,7 @@ export async function resolveRound(
           repChanges[targetId] = (repChanges[targetId] || 0) + targetPenalty;
           repChanges[player.id] = (repChanges[player.id] || 0) + auditorReward;
 
-          audits.push({
+          const lieAudit: AuditRecord = {
             auditorId: player.id,
             auditorName: player.displayName,
             targetId: targetPlayer.id,
@@ -1099,10 +1190,13 @@ export async function resolveRound(
             claimed: targetClaimed,
             actual: targetActual,
             repChanges: auditRepDelta,
-            redirectedFromId: wasRedirected ? sub.auditTargetId : undefined,
-            redirectedFromName: wasRedirected ? originalTargetName : undefined,
             timestamp: Date.now(),
-          });
+          };
+          if (wasRedirected) {
+            lieAudit.redirectedFromId = sub.auditTargetId || '';
+            lieAudit.redirectedFromName = originalTargetName || '';
+          }
+          audits.push(lieAudit);
         } else {
           // HONEST PLAYER FALSELY AUDITED!
           const auditorPenalty = -3;
@@ -1119,17 +1213,20 @@ export async function resolveRound(
             auditRepDelta[player.id] = (auditRepDelta[player.id] || 0) - 3;
           }
 
-          audits.push({
+          const honestAudit: AuditRecord = {
             auditorId: player.id,
             auditorName: player.displayName,
             targetId: targetPlayer.id,
             targetName: targetPlayer.displayName,
             result: 'honest',
             repChanges: auditRepDelta,
-            redirectedFromId: wasRedirected ? sub.auditTargetId : undefined,
-            redirectedFromName: wasRedirected ? originalTargetName : undefined,
             timestamp: Date.now(),
-          });
+          };
+          if (wasRedirected) {
+            honestAudit.redirectedFromId = sub.auditTargetId || '';
+            honestAudit.redirectedFromName = originalTargetName || '';
+          }
+          audits.push(honestAudit);
         }
       }
     }
@@ -2436,7 +2533,7 @@ export async function resolveFoundingPhase(gameId: string) {
     stage: 'nomination',
     nominees: [],
     votes: {},
-    stageClosesAt: Date.now() + 25000,
+    stageClosesAt: Date.now() + 75000,
   };
 
   const publicLogCol = collection(db, `games/${gameId}/publicLog`);
@@ -2474,30 +2571,40 @@ export async function nominateGovernor(
 
   if (gameData.roundPhase !== 'election') throw new Error('Not currently in Election Phase.');
   const election = gameData.activeElection as ElectionData;
-  if (election.stage !== 'nomination') throw new Error('Nominations are closed.');
+  if (!election) throw new Error('No active election.');
+  if (election.stage === 'resolved') throw new Error('Election has already concluded.');
 
   const privRef = doc(db, `games/${gameId}/players/${playerId}/private`, 'profile');
   const privSnap = await getDoc(privRef);
-  if (!privSnap.exists()) throw new Error('Player profile not found.');
-  const profile = privSnap.data();
+  const profile = privSnap.exists() ? privSnap.data() : { stash: 0 };
+  const currentStash = profile.stash || 0;
 
-  if (profile.stash < 1) throw new Error('Filing for Governor costs 1 Stash.');
+  // Deduct 1 stash filing fee if available; permit grassroots filing if 0 stash
+  if (currentStash > 0) {
+    await updateDoc(privRef, { stash: currentStash - 1 });
+  }
 
   const playerRef = doc(db, `games/${gameId}/players`, playerId);
   const playerSnap = await getDoc(playerRef);
   const playerName = playerSnap.data()?.displayName || 'A Castaway';
 
-  // Deduct 1 stash filing fee
-  await updateDoc(privRef, { stash: profile.stash - 1 });
-
   const cleanPromise = promiseText.slice(0, 120);
-  const parsedPromise = parseCampaignPromise(cleanPromise);
+  const parsedPromise = await parseCampaignPromise(cleanPromise);
+
+  const cleanParsedPromise: any = {
+    goal: parsedPromise.goal || 'unmeasurable',
+    measurable: !!parsedPromise.measurable,
+    type: parsedPromise.type || 'unmeasurable',
+  };
+  if (typeof parsedPromise.targetValue === 'number' && !isNaN(parsedPromise.targetValue)) {
+    cleanParsedPromise.targetValue = parsedPromise.targetValue;
+  }
 
   const newNominee: ElectionNominee = {
     playerId,
     playerName,
     promise: cleanPromise,
-    parsedPromise,
+    parsedPromise: cleanParsedPromise,
     votesReceived: 0,
   };
 
@@ -2518,6 +2625,10 @@ export async function advanceElectionStage(gameId: string, hostId: string) {
   const election = gameData.activeElection as ElectionData;
   if (!election) throw new Error('No active election.');
 
+  const playersRef = collection(db, `games/${gameId}/players`);
+  const playersSnap = await getDocs(playersRef);
+  const playersList = playersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
   if (election.stage === 'nomination') {
     election.stage = 'campaign';
     await updateDoc(gameRef, {
@@ -2526,6 +2637,36 @@ export async function advanceElectionStage(gameId: string, hostId: string) {
     });
   } else if (election.stage === 'campaign') {
     election.stage = 'vote';
+
+    // If nominee list is empty when opening ballots, auto-populate all players so ballot is not empty
+    let nominees = election.nominees ? [...election.nominees] : [];
+    if (nominees.length === 0) {
+      nominees = playersList.map((p) => ({
+        playerId: p.id,
+        playerName: (p as any).displayName || 'A Castaway',
+        promise: 'Colony service, order, and honest labor.',
+        parsedPromise: {
+          goal: 'unmeasurable',
+          measurable: false,
+          type: 'unmeasurable',
+        },
+        votesReceived: 0,
+      }));
+      election.nominees = nominees;
+    }
+
+    // Auto-cast ballots for bots upon opening the ballot so that participation is visible
+    if (nominees.length > 0) {
+      const votes = { ...(election.votes || {}) };
+      for (const p of playersList) {
+        if ((p as any).isBot && !votes[p.id]) {
+          const pick = nominees[Math.floor(Math.random() * nominees.length)];
+          votes[p.id] = pick.playerId;
+        }
+      }
+      election.votes = votes;
+    }
+
     await updateDoc(gameRef, {
       activeElection: election,
       gmNarration: 'The ballots are distributed. Castaways must choose their Governor.',
@@ -2547,10 +2688,30 @@ export async function submitElectionVote(
 
   if (gameData.roundPhase !== 'election') throw new Error('Not in Election Phase.');
   const election = gameData.activeElection as ElectionData;
+  if (!election) throw new Error('No active election.');
   if (election.stage !== 'vote') throw new Error('Voting is not open yet.');
 
-  if (voterId === targetNomineeId) {
-    throw new Error('Castaways cannot vote for themselves.');
+  // Validate target nominee is registered on the ballot or dynamically register as eligible candidate
+  let nomineeExists = election.nominees?.some((n) => n.playerId === targetNomineeId);
+  if (!nomineeExists) {
+    const playersRef = collection(db, `games/${gameId}/players`);
+    const playersSnap = await getDocs(playersRef);
+    const targetPlayer = playersSnap.docs.find((d) => d.id === targetNomineeId);
+    if (targetPlayer) {
+      const pData = targetPlayer.data();
+      const newNom: ElectionNominee = {
+        playerId: targetNomineeId,
+        playerName: pData.displayName || 'A Castaway',
+        promise: 'Colony write-in candidate.',
+        votesReceived: 0,
+      };
+      election.nominees = [...(election.nominees || []), newNom];
+      nomineeExists = true;
+    }
+  }
+
+  if (!nomineeExists) {
+    throw new Error('Selected candidate is not on the ballot.');
   }
 
   const votes = { ...(election.votes || {}), [voterId]: targetNomineeId };
@@ -2579,9 +2740,8 @@ export async function resolveElection(gameId: string) {
   // Auto-vote for bots if needed
   for (const p of playersList) {
     if ((p as any).isBot && !votes[p.id]) {
-      const eligible = nominees.filter((n) => n.playerId !== p.id);
-      if (eligible.length > 0) {
-        const pick = eligible[Math.floor(Math.random() * eligible.length)];
+      if (nominees.length > 0) {
+        const pick = nominees[Math.floor(Math.random() * nominees.length)];
         votes[p.id] = pick.playerId;
       }
     }
@@ -2595,6 +2755,15 @@ export async function resolveElection(gameId: string) {
   for (const vTarget of Object.values(votes)) {
     if (voteCounts[vTarget] !== undefined) {
       voteCounts[vTarget] += 1;
+    } else {
+      voteCounts[vTarget] = 1;
+      const targetP = playersList.find((p) => p.id === vTarget);
+      nominees.push({
+        playerId: vTarget,
+        playerName: (targetP as any)?.displayName || 'A Castaway',
+        promise: 'Colony write-in candidate.',
+        votesReceived: 1,
+      });
     }
   }
 
@@ -2634,8 +2803,13 @@ export async function resolveElection(gameId: string) {
     const fallback = sorted[0];
     winner = {
       playerId: fallback.id,
-      playerName: (fallback as any).displayName,
+      playerName: (fallback as any).displayName || 'A Castaway',
       promise: 'I will maintain order.',
+      parsedPromise: {
+        goal: 'unmeasurable',
+        measurable: false,
+        type: 'unmeasurable',
+      },
       votesReceived: 0,
     };
   }
@@ -2646,7 +2820,11 @@ export async function resolveElection(gameId: string) {
     termStart: gameData.round || 1,
     termLength: 3,
     campaignPromise: winner.promise,
-    parsedPromise: winner.parsedPromise,
+    parsedPromise: winner.parsedPromise || {
+      goal: 'unmeasurable',
+      measurable: false,
+      type: 'unmeasurable',
+    },
     pardonUsed: false,
     emergencyUsed: false,
     history: [],
@@ -3402,7 +3580,7 @@ export async function advanceRevealBeat(gameId: string) {
     } else {
       endgame.step = 'blame_vote';
       endgame.stepStartedAt = Date.now();
-      endgame.stepClosesAt = Date.now() + 30000;
+      endgame.stepClosesAt = Date.now() + 90000;
       await updateDoc(gameRef, { endgame });
       return { success: true, step: 'blame_vote' };
     }
@@ -3640,7 +3818,7 @@ export async function advanceEndgameStep(gameId: string, hostId?: string) {
   if (endgame.step === 'accounting') {
     endgame.step = 'confession';
     endgame.stepStartedAt = Date.now();
-    endgame.stepClosesAt = Date.now() + 60000;
+    endgame.stepClosesAt = Date.now() + 180000;
     await updateDoc(gameRef, { endgame });
     return { success: true, step: 'confession' };
   }
@@ -3678,7 +3856,7 @@ export async function advanceEndgameStep(gameId: string, hostId?: string) {
     } else {
       endgame.step = 'blame_vote';
       endgame.stepStartedAt = Date.now();
-      endgame.stepClosesAt = Date.now() + 30000;
+      endgame.stepClosesAt = Date.now() + 90000;
       await updateDoc(gameRef, { endgame });
       return { success: true, step: 'blame_vote' };
     }

@@ -28,6 +28,7 @@ interface SchemeHandDrawerProps {
   currentPhase: 'scavenge' | 'resolution' | 'ledger';
   currentLabor?: number;
   currentClaimedLabor?: number;
+  hasPlayedCardThisRound?: boolean;
   onPlayCard: (cardId: SchemeCardId, targetId?: string) => Promise<void>;
   onDiscardCard: (cardId: SchemeCardId) => Promise<void>;
   selectedScavengeCard: SchemeCardId | null;
@@ -95,6 +96,7 @@ export const SchemeHandDrawer: React.FC<SchemeHandDrawerProps> = ({
   currentPhase,
   currentLabor = 0,
   currentClaimedLabor = 0,
+  hasPlayedCardThisRound = false,
   onPlayCard,
   onDiscardCard,
   selectedScavengeCard,
@@ -278,10 +280,15 @@ export const SchemeHandDrawer: React.FC<SchemeHandDrawerProps> = ({
                             <button
                               type="button"
                               onClick={() => setModalCardId(cardId)}
-                              disabled={!canAfford || isLoading}
-                              className="px-2 py-1 rounded text-[10px] font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                              disabled={!canAfford || isLoading || hasPlayedCardThisRound}
+                              title={hasPlayedCardThisRound ? '1 Scheme card max per round' : undefined}
+                              className={`px-2 py-1 rounded text-[10px] font-bold transition-all ${
+                                hasPlayedCardThisRound
+                                  ? 'bg-[#192436] text-slate-400 opacity-50 cursor-not-allowed'
+                                  : 'bg-amber-500 hover:bg-amber-400 text-slate-950 disabled:opacity-40 disabled:cursor-not-allowed'
+                              }`}
                             >
-                              Play Now
+                              {hasPlayedCardThisRound ? 'Played' : 'Play Now'}
                             </button>
                           )}
 
@@ -316,6 +323,7 @@ export const SchemeHandDrawer: React.FC<SchemeHandDrawerProps> = ({
         currentPhase={currentPhase}
         currentLabor={currentLabor}
         currentClaimedLabor={currentClaimedLabor}
+        hasPlayedCardThisRound={hasPlayedCardThisRound}
         isLoading={isLoading}
       />
     </>

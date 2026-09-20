@@ -2,6 +2,7 @@
   "name": "THE RAFT",
   "description": "A satirical social-deduction survival multiplayer game where castaways build a raft while secretly hoarding resources and lying on a public ledger.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }
-

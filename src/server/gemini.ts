@@ -3,6 +3,59 @@ import type { AuditRecord, RoleActionRecord, CardPlayRecord, LaunchData } from '
 
 const BASE_GM_INSTRUCTION = `You are the Game Master of THE RAFT, a satirical survival game about collective failure and hidden greed. You narrate events in one vivid, deadpan sentence. You never reveal hidden information. You never break character. You never explain mechanics. You describe consequence. When an election occurs, narrate it as a scene of quiet desperation. When a Governor embezzles, narrate it obliquely — as a smell of something burning, a number that doesn't add up. When a promise breaks, narrate the betrayal without naming the promise. When an impeachment succeeds, narrate the fall like a state funeral. When an impeachment fails, narrate the survivor's smugness. During the Launch Phase, narrate each step as a scene: the Provisioner's boarding, the vote's quiet cruelty, the buyout's transactional shame, the swimmer's last gamble. Never name a Scheme card. Never explain a mechanic. Describe the human moment.`;
 
+/**
+ * Resilient Gemini API invocation with automatic model failover and silent procedural fallback.
+ * Tries 'gemini-3.8-flash' first, then 'gemini-3.1-flash-lite' if quota/rate-limits are reached.
+ * Never throws or logs unhandled errors into the console when quota is exhausted.
+ */
+async function callGeminiSafe(params: {
+  contents: string;
+  systemInstruction?: string;
+  temperature?: number;
+  responseMimeType?: string;
+}): Promise<string | null> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const ai = new GoogleGenAI({ apiKey });
+    const candidateModels = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
+
+    for (const model of candidateModels) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: params.contents,
+          config: {
+            systemInstruction: params.systemInstruction,
+            temperature: params.temperature ?? 0.7,
+            responseMimeType: params.responseMimeType,
+          },
+        });
+        const text = response.text?.trim();
+        if (text) {
+          return text;
+        }
+      } catch (err: any) {
+        const msg = err?.message || String(err);
+        const isQuota =
+          msg.includes('429') ||
+          msg.includes('quota') ||
+          msg.includes('RESOURCE_EXHAUSTED') ||
+          msg.includes('rate');
+        if (isQuota) {
+          // If first model reached rate/quota limit, failover to secondary model
+          continue;
+        }
+        break;
+      }
+    }
+  } catch {
+    // Return null to serve procedural fallback cleanly
+  }
+  return null;
+}
+
 export async function parseCampaignPromise(promise: string): Promise<{
   goal: string;
   measurable: boolean;
@@ -14,8 +67,12 @@ export async function parseCampaignPromise(promise: string): Promise<{
     return { goal: 'unmeasurable', measurable: false, type: 'unmeasurable' };
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
+  const fallbackRuleBased = (): {
+    goal: string;
+    measurable: boolean;
+    type: 'labor' | 'no_embezzle' | 'reputation' | 'unmeasurable';
+    targetValue?: number;
+  } => {
     const lower = cleanPromise.toLowerCase();
     if (lower.includes('not embezzle') || lower.includes('no embezzle') || lower.includes('honest')) {
       return { goal: 'zero embezzlements this term', measurable: true, type: 'no_embezzle', targetValue: 0 };
@@ -24,36 +81,43 @@ export async function parseCampaignPromise(promise: string): Promise<{
       return { goal: 'contribute >=2 Labor per round', measurable: true, type: 'labor', targetValue: 2 };
     }
     return { goal: 'unmeasurable', measurable: false, type: 'unmeasurable' };
-  }
+  };
 
-  try {
-    const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: `Analyze this satirical politician campaign promise from a survival game: "${cleanPromise}".
+  const rawJson = await callGeminiSafe({
+    contents: `Analyze this satirical politician campaign promise from a survival game: "${cleanPromise}".
 Classify if this promise is objectively measurable in the game, and categorize it into one of:
 1. "no_embezzle" (e.g., promises not to steal, embezzle, or cheat the raft) -> goal: "zero embezzlements this term", measurable: true
 2. "labor" (e.g., promises to build raft, provide labor, contribute X amount) -> goal: "contribute >=2 Labor per round", measurable: true
 3. "unmeasurable" (e.g., "make the island great again", "protect the weak", vague rhetoric, meaningless slogans) -> goal: "unmeasurable", measurable: false
 
 Respond in pure JSON with keys: goal (string), measurable (boolean), type ("labor" | "no_embezzle" | "unmeasurable"), targetValue (optional number).`,
-      config: {
-        responseMimeType: 'application/json',
-        temperature: 0.2,
-      },
-    });
+    responseMimeType: 'application/json',
+    temperature: 0.2,
+  });
 
-    const parsed = JSON.parse(response.text || '{}');
-    return {
-      goal: parsed.goal || 'unmeasurable',
-      measurable: Boolean(parsed.measurable),
-      type: parsed.type || 'unmeasurable',
-      targetValue: parsed.targetValue,
-    };
-  } catch (err) {
-    console.error('Promise parsing error:', err);
-    return { goal: 'unmeasurable', measurable: false, type: 'unmeasurable' };
+  if (rawJson) {
+    try {
+      const parsed = JSON.parse(rawJson);
+      const result: {
+        goal: string;
+        measurable: boolean;
+        type: 'labor' | 'no_embezzle' | 'reputation' | 'unmeasurable';
+        targetValue?: number;
+      } = {
+        goal: parsed.goal || 'unmeasurable',
+        measurable: Boolean(parsed.measurable),
+        type: parsed.type || 'unmeasurable',
+      };
+      if (typeof parsed.targetValue === 'number' && !isNaN(parsed.targetValue)) {
+        result.targetValue = parsed.targetValue;
+      }
+      return result;
+    } catch {
+      // Fall through to deterministic rules
+    }
   }
+
+  return fallbackRuleBased();
 }
 
 export async function generateElectionNarration(params: {
@@ -62,27 +126,14 @@ export async function generateElectionNarration(params: {
   voteCount?: number;
   totalVoters?: number;
 }): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return `${params.winnerName} accepts the mandate with a solemn bow as the remaining castaways study the shoreline.`;
-  }
+  const fallback = `${params.winnerName} accepts the mandate with a solemn bow as the remaining castaways study the shoreline.`;
+  const text = await callGeminiSafe({
+    contents: `A newly elected Governor (${params.winnerName}) has taken office on the desolate island after promising: "${params.promise}". Write exactly ONE deadpan, vivid sentence describing their quiet ascension. Do not mention game mechanics.`,
+    systemInstruction: BASE_GM_INSTRUCTION,
+    temperature: 0.7,
+  });
 
-  try {
-    const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: `A newly elected Governor (${params.winnerName}) has taken office on the desolate island after promising: "${params.promise}". Write exactly ONE deadpan, vivid sentence describing their quiet ascension. Do not mention game mechanics.`,
-      config: {
-        systemInstruction: BASE_GM_INSTRUCTION,
-        temperature: 0.7,
-      },
-    });
-
-    const text = response.text?.trim();
-    return text ? text.replace(/^["']|["']$/g, '') : `${params.winnerName} takes stewardship of the damp ledger under a gathering gray sky.`;
-  } catch (err) {
-    return `${params.winnerName} ascends to the governorship with polite applause echoing over cold shale.`;
-  }
+  return text ? text.replace(/^["']|["']$/g, '') : fallback;
 }
 
 export async function generateImpeachmentNarration(params: {
@@ -96,35 +147,22 @@ export async function generateImpeachmentNarration(params: {
   totalEmbezzled?: number;
 }): Promise<string> {
   const isImpeached = params.outcome === 'impeached' || params.impeached === true;
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    if (isImpeached) {
-      return `${params.governorName} was stripped of authority in disgrace, leaving their hoarded timber exposed to the tide.`;
-    }
-    return `${params.governorName} survived the vote with cold composure, casting a chilling glance back toward ${params.filerName}.`;
-  }
+  const stolenAmount = params.embezzledAmount || params.totalEmbezzled;
+  const fallback = isImpeached
+    ? `${params.governorName} was stripped of authority in disgrace, leaving their hoarded timber exposed to the tide.`
+    : `${params.governorName} survived the vote with cold composure, casting a chilling glance back toward ${params.filerName}.`;
 
-  try {
-    const ai = new GoogleGenAI({ apiKey });
-    const stolenAmount = params.embezzledAmount || params.totalEmbezzled;
-    const prompt = isImpeached
-      ? `Governor ${params.governorName} has been successfully impeached after accusations brought by ${params.filerName}. ${stolenAmount ? `They secretly stole ${stolenAmount} timber from the raft.` : ''} Write ONE deadpan sentence describing their public fall like a somber state funeral.`
-      : `Governor ${params.governorName} survived an attempted coup and impeachment vote filed by ${params.filerName}. Write ONE deadpan sentence describing the Governor's smug composure and the filer's public humiliation.`;
+  const prompt = isImpeached
+    ? `Governor ${params.governorName} has been successfully impeached after accusations brought by ${params.filerName}. ${stolenAmount ? `They secretly stole ${stolenAmount} timber from the raft.` : ''} Write ONE deadpan sentence describing their public fall like a somber state funeral.`
+    : `Governor ${params.governorName} survived an attempted coup and impeachment vote filed by ${params.filerName}. Write ONE deadpan sentence describing the Governor's smug composure and the filer's public humiliation.`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: {
-        systemInstruction: BASE_GM_INSTRUCTION,
-        temperature: 0.7,
-      },
-    });
+  const text = await callGeminiSafe({
+    contents: prompt,
+    systemInstruction: BASE_GM_INSTRUCTION,
+    temperature: 0.7,
+  });
 
-    const text = response.text?.trim();
-    return text ? text.replace(/^["']|["']$/g, '') : `${params.governorName}'s term reaches its reckoning upon the desolate tide line.`;
-  } catch (err) {
-    return `${params.governorName} endures the judgment of the camp as the gray sea turns.`;
-  }
+  return text ? text.replace(/^["']|["']$/g, '') : fallback;
 }
 
 export async function generatePromiseEvaluationNarration(params: {
@@ -132,35 +170,22 @@ export async function generatePromiseEvaluationNarration(params: {
   promise: string;
   status: 'kept' | 'broken' | 'unmeasurable';
 }): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    if (params.status === 'kept') {
-      return `${params.governorName} leaves office with rare dignity, having fulfilled their public oath.`;
-    }
-    if (params.status === 'broken') {
-      return `The lofty commitments of ${params.governorName} washed out with the morning tide, leaving bitter silence behind.`;
-    }
-    return `The tenure of ${params.governorName} ends in bureaucratic fog; history records only shifting sand and vague intent.`;
+  let fallback = `${params.governorName}'s record stands recorded in damp ink.`;
+  if (params.status === 'kept') {
+    fallback = `${params.governorName} leaves office with rare dignity, having fulfilled their public oath.`;
+  } else if (params.status === 'broken') {
+    fallback = `The lofty commitments of ${params.governorName} washed out with the morning tide, leaving bitter silence behind.`;
   }
 
-  try {
-    const ai = new GoogleGenAI({ apiKey });
-    const prompt = `Governor ${params.governorName}'s term has ended. Their original campaign promise was: "${params.promise}". Status of promise: ${params.status}. Write ONE deadpan satirical sentence describing this legacy without reciting the literal wording of the promise.`;
+  const prompt = `Governor ${params.governorName}'s term has ended. Their original campaign promise was: "${params.promise}". Status of promise: ${params.status}. Write ONE deadpan satirical sentence describing this legacy without reciting the literal wording of the promise.`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: {
-        systemInstruction: BASE_GM_INSTRUCTION,
-        temperature: 0.7,
-      },
-    });
+  const text = await callGeminiSafe({
+    contents: prompt,
+    systemInstruction: BASE_GM_INSTRUCTION,
+    temperature: 0.7,
+  });
 
-    const text = response.text?.trim();
-    return text ? text.replace(/^["']|["']$/g, '') : `${params.governorName}'s record stands recorded in damp ink.`;
-  } catch (err) {
-    return `The legacy of ${params.governorName} dissolves quietly into the surf.`;
-  }
+  return text ? text.replace(/^["']|["']$/g, '') : fallback;
 }
 
 export async function generateGMNarration(params: {
@@ -226,8 +251,7 @@ export async function generateGMNarration(params: {
 
   const prompt = `Current Round: ${params.round}. Raft Stage: ${params.raftStage}. Active Castaways: ${params.playerCount}. Total Public Claimed Labor: ${params.claimedTotal}. True Physical Labor: ${params.actualTotal}. Context: ${contextHint}.${auditContext}${cardContext} Write exactly ONE deadpan, vivid sentence describing what occurred this round on the desolate shore.`;
 
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
+  const fallback = (() => {
     if (params.cardsPlayed && params.cardsPlayed.some(c => c.cardId === 'sabotage')) {
       return "A strange, hollow thud sounded from the keel as the tide rose, though everyone insisted the binding was secure.";
     }
@@ -242,7 +266,6 @@ export async function generateGMNarration(params: {
       ];
       return auditFallbacks[(params.round - 1) % auditFallbacks.length];
     }
-
     const fallbackList = [
       "The logs creak into place with agonizing reluctance, bearing faint resemblance to the declarations in the ledger.",
       "A collective sigh drifts into the surf as three castaways nurse splintered palms in suspicious silence.",
@@ -251,36 +274,22 @@ export async function generateGMNarration(params: {
       "Another evening descends upon the beach with empty promises drying faster than the timber."
     ];
     return fallbackList[(params.round - 1) % fallbackList.length];
-  }
+  })();
 
-  try {
-    const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: {
-        systemInstruction: BASE_GM_INSTRUCTION,
-        temperature: 0.7,
-      },
-    });
+  const text = await callGeminiSafe({
+    contents: prompt,
+    systemInstruction: BASE_GM_INSTRUCTION,
+    temperature: 0.7,
+  });
 
-    const text = response.text?.trim();
-    if (text) {
-      return text.replace(/^["']|["']$/g, '');
-    }
-    return "The raft creaks forward into the tide, leaving signatures to rot upon the ledger.";
-  } catch (err) {
-    console.error('Gemini GM narration API error:', err);
-    return "The timber shifts against the swell; nobody volunteers to check the knots.";
-  }
+  return text ? text.replace(/^["']|["']$/g, '') : fallback;
 }
 
 export async function generateLaunchNarration(params: {
   step: string;
   details: string;
 }): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
+  const fallback = (() => {
     if (params.step === 'provisioner') {
       return "The one who hoarded the grain steps aboard first, stepping squarely across the wet sand without turning back.";
     }
@@ -294,25 +303,15 @@ export async function generateLaunchNarration(params: {
       return "A desperate plunge into the churning foam decided the final berth before the timber pulled away.";
     }
     return "The vessel rocks gently in the surf as the passenger manifest is sealed.";
-  }
+  })();
 
-  try {
-    const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: `Launch Step: ${params.step}. Scene details: ${params.details}. Write exactly ONE deadpan, vivid sentence describing this human moment of survival and betrayal.`,
-      config: {
-        systemInstruction: BASE_GM_INSTRUCTION,
-        temperature: 0.7,
-      },
-    });
+  const text = await callGeminiSafe({
+    contents: `Launch Step: ${params.step}. Scene details: ${params.details}. Write exactly ONE deadpan, vivid sentence describing this human moment of survival and betrayal.`,
+    systemInstruction: BASE_GM_INSTRUCTION,
+    temperature: 0.7,
+  });
 
-    const text = response.text?.trim();
-    return text ? text.replace(/^["']|["']$/g, '') : "The cold tide rushes against the hull as seat assignments settle.";
-  } catch (err) {
-    console.error('Launch narration error:', err);
-    return "The sea offers no second chances as the passenger list is carved into the damp gunwale.";
-  }
+  return text ? text.replace(/^["']|["']$/g, '') : fallback;
 }
 
 export async function generateLaunchScene(params: {
@@ -321,30 +320,17 @@ export async function generateLaunchScene(params: {
   drownedPlayers: string[];
   totalSeats: number;
 }): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const fallback = `The lashed timbers groan as the tide catches the keel, pulling the few survivors past the reef and into the gray open water. From the spray-soaked gunwale, the shore shrinks to a dark sliver of rock and silence. On the wet sand, those left behind stand shoulder-to-shoulder, watching the sail catch the wind and leave them to the approaching winter.`;
+
   const prompt = `The raft has launched into the open ocean. Seated survivors on board: ${params.seatedPlayers.join(', ') || 'Nobody'}. Castaways left standing on the shore: ${params.leftBehindPlayers.join(', ') || 'None'}. Drowned swimmers: ${params.drownedPlayers.join(', ') || 'None'}. Write a closing scene of exactly 2 to 3 sentences describing the departure of the vessel and the view from shore, ending with a line about the shore and who remains on it. Do not name any game mechanics or Scheme cards.`;
 
-  if (!apiKey) {
-    return `The lashed timbers groan as the tide catches the keel, pulling the few survivors past the reef and into the gray open water. From the spray-soaked gunwale, the shore shrinks to a dark sliver of rock and silence. On the wet sand, those left behind stand shoulder-to-shoulder, watching the sail catch the wind and leave them to the approaching winter.`;
-  }
+  const text = await callGeminiSafe({
+    contents: prompt,
+    systemInstruction: BASE_GM_INSTRUCTION,
+    temperature: 0.7,
+  });
 
-  try {
-    const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: {
-        systemInstruction: BASE_GM_INSTRUCTION,
-        temperature: 0.7,
-      },
-    });
-
-    const text = response.text?.trim();
-    return text ? text.replace(/^["']|["']$/g, '') : `The crude vessel cuts slowly through the rolling swell, leaving a faint foamy wake that vanishes in the dark water. Those standing upon the shore clutch their remaining rags against the wind, their eyes fixed upon the receding sail. The tide rises over their footprints, indifferent to who was saved and who was abandoned.`;
-  } catch (err) {
-    console.error('Launch scene error:', err);
-    return `The raft pulls out beyond the breakers, its makeshift sail bowing under the offshore wind. On the strand, the damp ledger and the remaining castaways watch the distance widen. Only the cold spray bridges the gap between those who boarded and those left to the island.`;
-  }
+  return text ? text.replace(/^["']|["']$/g, '') : fallback;
 }
 
 // ---------------------------------------------------------
@@ -367,7 +353,14 @@ export async function generateEndgameAccountingNarration(params: {
   cardsPlayedCount: number;
   confession?: string;
 }): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const fallback = params.fate === 'ESCAPED'
+    ? `${params.displayName}, acting as ${params.role}, claimed a cumulative gap of ${params.gap} and took a seat across the swell while the timber held.`
+    : params.fate === 'DROWNED'
+    ? `The ${params.role} accumulated a ledger discrepancy of ${params.gap} before slipping under the breakers in the final scramble.`
+    : params.fate === 'SOLO ESCAPE'
+    ? `${params.displayName} abandoned the colony with ${params.stash} stash in hand, leaving their fellow castaways to reckon with an empty berth.`
+    : `${params.displayName} stood on the strand as the vessel departed, their true labor of ${params.trueLabor} overshadowed by the ${params.gap} units they withheld.`;
+
   const prompt = `Castaway Name: ${params.displayName}
 True Role: ${params.role}
 True Labor Delivered: ${params.trueLabor}
@@ -381,35 +374,13 @@ ${params.confession ? `Their Confession: "${params.confession}"` : 'Confession: 
 
 Write exactly ONE sentence — dry, historical, without pity — summarizing this castaway's game. Reference their role, their gap, and their fate. Never moralize. Never explain. Describe.`;
 
-  const fallback = params.fate === 'ESCAPED'
-    ? `${params.displayName}, acting as ${params.role}, claimed a cumulative gap of ${params.gap} and took a seat across the swell while the timber held.`
-    : params.fate === 'DROWNED'
-    ? `The ${params.role} accumulated a ledger discrepancy of ${params.gap} before slipping under the breakers in the final scramble.`
-    : params.fate === 'SOLO ESCAPE'
-    ? `${params.displayName} abandoned the colony with ${params.stash} stash in hand, leaving their fellow castaways to reckon with an empty berth.`
-    : `${params.displayName} stood on the strand as the vessel departed, their true labor of ${params.trueLabor} overshadowed by the ${params.gap} units they withheld.`;
+  const text = await callGeminiSafe({
+    contents: prompt,
+    systemInstruction: `You are the chronicler of THE RAFT's final session. For each player, write ONE sentence — dry, historical, without pity — summarizing their game. Reference their role, their gap, and their fate. Never moralize. Never explain. Describe.`,
+    temperature: 0.6,
+  });
 
-  if (!apiKey) {
-    return fallback;
-  }
-
-  try {
-    const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: {
-        systemInstruction: `You are the chronicler of THE RAFT's final session. For each player, write ONE sentence — dry, historical, without pity — summarizing their game. Reference their role, their gap, and their fate. Never moralize. Never explain. Describe.`,
-        temperature: 0.6,
-      },
-    });
-
-    const text = response.text?.trim();
-    return text ? text.replace(/^["']|["']$/g, '') : fallback;
-  } catch (err) {
-    console.error('Endgame player narration error:', err);
-    return fallback;
-  }
+  return text ? text.replace(/^["']|["']$/g, '') : fallback;
 }
 
 /**
@@ -424,36 +395,21 @@ export async function generateEndgameVerdict(params: {
   isTie?: boolean;
   guiltyNames?: string[];
 }): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  const prompt = params.isTie && params.guiltyNames && params.guiltyNames.length > 1
-    ? `The blame vote deadlocked between ${params.guiltyNames.join(' and ')}. Both are condemned by the table with tied votes and equal ledger duplicity. Write 2–3 sentences in the tone of a historical judgment — conclusive, quiet, without cruelty. You are not punishing. You are recording. The last sentence should land like a stamp.`
-    : `The table has cast ${params.voteCount} weighted blame votes naming ${params.guiltyName} as The Guilty. Their cumulative ledger gap across all rounds was ${params.cumulativeGap}. ${params.blameClause === 'binding' ? 'The Constitutional Blame Clause was BINDING, marking them permanently.' : 'The condemnation is recorded into the colony annals.'} Write 2–3 sentences in the tone of a historical judgment — conclusive, quiet, without cruelty. You are not punishing. You are recording. The last sentence should land like a stamp.`;
-
   const fallback = params.isTie && params.guiltyNames && params.guiltyNames.length > 1
     ? `The assembly divided its accusation evenly between ${params.guiltyNames.join(' and ')}, finding equal measures of withheld labor and calculated silence. In the absence of a singular scapegoat, the record binds them both to the vessel's failure. Their names remain affixed to the ruin of the expedition.`
     : `By majority tally and the testimony of the unseated, ${params.guiltyName} was singled out as the architect of the colony's ruin. The discrepancy between their claims and their actual toil exceeded the fragile tolerance of the group. The vote concluded without appeal.`;
 
-  if (!apiKey) {
-    return fallback;
-  }
+  const prompt = params.isTie && params.guiltyNames && params.guiltyNames.length > 1
+    ? `The blame vote deadlocked between ${params.guiltyNames.join(' and ')}. Both are condemned by the table with tied votes and equal ledger duplicity. Write 2–3 sentences in the tone of a historical judgment — conclusive, quiet, without cruelty. You are not punishing. You are recording. The last sentence should land like a stamp.`
+    : `The table has cast ${params.voteCount} weighted blame votes naming ${params.guiltyName} as The Guilty. Their cumulative ledger gap across all rounds was ${params.cumulativeGap}. ${params.blameClause === 'binding' ? 'The Constitutional Blame Clause was BINDING, marking them permanently.' : 'The condemnation is recorded into the colony annals.'} Write 2–3 sentences in the tone of a historical judgment — conclusive, quiet, without cruelty. You are not punishing. You are recording. The last sentence should land like a stamp.`;
 
-  try {
-    const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: {
-        systemInstruction: `You are the tribunal of THE RAFT. The table has named a Guilty. Write 2–3 sentences in the tone of a historical judgment — conclusive, quiet, without cruelty. You are not punishing. You are recording. The last sentence should land like a stamp.`,
-        temperature: 0.6,
-      },
-    });
+  const text = await callGeminiSafe({
+    contents: prompt,
+    systemInstruction: `You are the tribunal of THE RAFT. The table has named a Guilty. Write 2–3 sentences in the tone of a historical judgment — conclusive, quiet, without cruelty. You are not punishing. You are recording. The last sentence should land like a stamp.`,
+    temperature: 0.6,
+  });
 
-    const text = response.text?.trim();
-    return text ? text.replace(/^["']|["']$/g, '') : fallback;
-  } catch (err) {
-    console.error('Endgame verdict error:', err);
-    return fallback;
-  }
+  return text ? text.replace(/^["']|["']$/g, '') : fallback;
 }
 
 /**
@@ -472,7 +428,10 @@ export async function generateEndgameEpitaph(params: {
   guiltyName?: string;
   mode?: string;
 }): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const fallback = params.outcome === 'ESCAPED'
+    ? `The Colony of Driftwood endured ${params.roundsPlayed} rounds of calculated promises until three lashed logs cleared the breakers with ${params.escapedCount} aboard. Survival was bought not by harmony, but by a meticulously budgeted ration of deceit. The tide washed clean the strand, leaving only an illegible ledger and the sound of receding water.`
+    : `Twelve rounds elapsed upon the sand without a seaworthy vessel ever tasting deep water. The colony exhaustively audited its members until starvation superseded the constitution. The island did not object; it never does.`;
+
   const prompt = `Rounds Played: ${params.roundsPlayed}
 Outcome: ${params.outcome}
 Escaped Survivors: ${params.escapedCount}
@@ -487,31 +446,13 @@ Second sentence: what it meant.
 Third sentence: what remains.
 Tone: mock-historical, dry, elegiac, in the style of a failed-state obituary. Never moralize. Never explain. The last sentence is the final word of the game — it should be quotable.`;
 
-  const fallback = params.outcome === 'ESCAPED'
-    ? `The Colony of Driftwood endured ${params.roundsPlayed} rounds of calculated promises until three lashed logs cleared the breakers with ${params.escapedCount} aboard. Survival was bought not by harmony, but by a meticulously budgeted ration of deceit. The tide washed clean the strand, leaving only an illegible ledger and the sound of receding water.`
-    : `Twelve rounds elapsed upon the sand without a seaworthy vessel ever tasting deep water. The colony exhaustively audited its members until starvation superseded the constitution. The island did not object; it never does.`;
+  const text = await callGeminiSafe({
+    contents: prompt,
+    systemInstruction: `You are the closing voice of THE RAFT. Write the session's epitaph in exactly 3 sentences. First sentence: what happened. Second sentence: what it meant. Third sentence: what remains. Tone: mock-historical, dry, elegiac, in the style of a failed-state obituary. Never moralize. Never explain. The last sentence is the final word of the game — it should be quotable.`,
+    temperature: 0.7,
+  });
 
-  if (!apiKey) {
-    return fallback;
-  }
-
-  try {
-    const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: {
-        systemInstruction: `You are the closing voice of THE RAFT. Write the session's epitaph in exactly 3 sentences. First sentence: what happened. Second sentence: what it meant. Third sentence: what remains. Tone: mock-historical, dry, elegiac, in the style of a failed-state obituary. Never moralize. Never explain. The last sentence is the final word of the game — it should be quotable.`,
-        temperature: 0.7,
-      },
-    });
-
-    const text = response.text?.trim();
-    return text ? text.replace(/^["']|["']$/g, '') : fallback;
-  } catch (err) {
-    console.error('Endgame epitaph error:', err);
-    return fallback;
-  }
+  return text ? text.replace(/^["']|["']$/g, '') : fallback;
 }
 
 /**
@@ -521,27 +462,14 @@ Tone: mock-historical, dry, elegiac, in the style of a failed-state obituary. Ne
 export async function generateIslandGuiltySentence(params: {
   guiltyName: string;
 }): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
   const prompt = `Player ${params.guiltyName} was condemned in Island Mode. Write a single poetic sentence pronouncing their fictional sentence from the island itself. It should cut deeply without melodrama.`;
   const fallback = `For ${params.guiltyName}, the island reserves no storm or wave—only an eternity of watching empty rafts float safely past the reef just beyond reach.`;
 
-  if (!apiKey) return fallback;
-  try {
-    const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: {
-        systemInstruction: BASE_GM_INSTRUCTION,
-        temperature: 0.7,
-      },
-    });
-    return response.text?.trim()?.replace(/^["']|["']$/g, '') || fallback;
-  } catch {
-    return fallback;
-  }
+  const text = await callGeminiSafe({
+    contents: prompt,
+    systemInstruction: BASE_GM_INSTRUCTION,
+    temperature: 0.7,
+  });
+
+  return text ? text.replace(/^["']|["']$/g, '') : fallback;
 }
-
-
-
-

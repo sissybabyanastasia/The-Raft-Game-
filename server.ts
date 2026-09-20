@@ -1,24 +1,45 @@
 import express from 'express';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { apiRouter } from './src/server/api.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+async function startServer() {
+  const app = express();
+  const PORT = 3000;
 
-const app = express();
-const port = 3000;
+  app.use(express.json());
 
-app.use(express.json());
-app.use('/api', apiRouter);
+  // API routes FIRST
+  app.use('/api', apiRouter);
 
-// Serve static build in production
-app.use(express.static(path.join(__dirname, 'dist')));
+  // Vite middleware for development, static files for production
+  if (process.env.NODE_ENV !== 'production') {
+    try {
+      const { createServer: createViteServer } = await import('vite');
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+      });
+      app.use(vite.middlewares);
+    } catch (e) {
+      console.warn('Vite dev middleware not loaded, serving static fallback:', e);
+      const distPath = path.join(process.cwd(), 'dist');
+      app.use(express.static(distPath));
+      app.get('*', (_req, res) => {
+        res.sendFile(path.join(distPath, 'index.html'));
+      });
+    }
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (_req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  }
 
-app.get('*', (_req, res) => {
-  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-});
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`THE RAFT server running on http://0.0.0.0:${PORT}`);
+  });
+}
 
-app.listen(port, () => {
-  console.log(`THE RAFT production server listening on port ${port}`);
-});
+startServer();
+

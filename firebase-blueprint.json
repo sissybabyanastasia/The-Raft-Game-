@@ -108,12 +108,25 @@
         "markedByTable": { "type": "boolean", "description": "Whether stamped with scarlet mark by table" },
         "confession": { "type": "string", "description": "Their final confession statement" }
       }
+    },
+    "deck": {
+      "title": "Scheme Deck State",
+      "description": "Shared scheme card draw and discard piles",
+      "type": "object",
+      "properties": {
+        "remaining": { "type": "array", "description": "Card IDs left to draw" },
+        "discarded": { "type": "array", "description": "Card IDs in discard pile" }
+      }
     }
   },
   "firestore": {
     "/games/{gameId}": {
       "schema": "games",
       "description": "Top-level game state and phase progression"
+    },
+    "/games/{gameId}/deck/{docId}": {
+      "schema": "deck",
+      "description": "Shared scheme card deck and discard pile"
     },
     "/games/{gameId}/players/{playerId}": {
       "schema": "players",

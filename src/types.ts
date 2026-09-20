@@ -420,6 +420,7 @@ export interface PlayerSubmission {
 export interface RoundData {
   submissions: Record<string, PlayerSubmission>;
   resolved: boolean;
+  resolving?: boolean;
   submittedPlayerIds: string[];
   cardsPlayed?: CardPlayRecord[];
   resolutionWindowOpen?: boolean;

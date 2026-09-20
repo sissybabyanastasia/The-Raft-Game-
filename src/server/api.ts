@@ -62,9 +62,8 @@ apiRouter.post('/gm/narrate', async (req: Request, res: Response) => {
       cardsPlayed,
     });
     res.json({ narration });
-  } catch (error: any) {
-    console.error('Error generating narration:', error);
-    res.status(500).json({ error: error.message || 'Failed to generate narration' });
+  } catch {
+    res.json({ narration: "The timber shifts against the swell; nobody volunteers to check the knots." });
   }
 });
 
@@ -183,7 +182,7 @@ apiRouter.post('/game/play-resolution-card', async (req: Request, res: Response)
     const result = await playResolutionCard(gameId, playerId, cardId, targetId);
     res.json(result);
   } catch (error: any) {
-    console.error('Play resolution card error:', error);
+    console.warn('Play resolution card warning:', error?.message);
     res.status(400).json({ error: error.message });
   }
 });
@@ -592,7 +591,7 @@ apiRouter.post('/game/endgame/resolve-blame', async (req: Request, res: Response
     const result = await resolveBlameVote(gameId);
     res.json(result);
   } catch (error: any) {
-    console.error('Endgame resolve blame error:', error);
+    console.warn('Endgame resolve blame warning:', error?.message);
     res.status(400).json({ error: error.message });
   }
 });
@@ -614,9 +613,9 @@ apiRouter.post('/gm/accounting', async (req: Request, res: Response) => {
       confession,
     });
     res.json({ narration });
-  } catch (error: any) {
-    console.error('Endgame accounting narration error:', error);
-    res.status(500).json({ error: error.message });
+  } catch {
+    const narration = 'Their true labor was overshadowed by the units they withheld; history records only shifting sand.';
+    res.json({ narration });
   }
 });
 
@@ -633,9 +632,9 @@ apiRouter.post('/gm/verdict', async (req: Request, res: Response) => {
       guiltyNames,
     });
     res.json({ verdict });
-  } catch (error: any) {
-    console.error('Endgame verdict error:', error);
-    res.status(500).json({ error: error.message });
+  } catch {
+    const verdict = 'By majority tally and the testimony of the unseated, the verdict concluded without appeal.';
+    res.json({ verdict });
   }
 });
 
@@ -653,9 +652,9 @@ apiRouter.post('/gm/epitaph', async (req: Request, res: Response) => {
       mode,
     });
     res.json({ epitaph });
-  } catch (error: any) {
-    console.error('Endgame epitaph error:', error);
-    res.status(500).json({ error: error.message });
+  } catch {
+    const epitaph = 'The island seals the record of Driftwood. Survival was bought not by harmony, but by a meticulously budgeted ration of deceit.';
+    res.json({ epitaph });
   }
 });
 
