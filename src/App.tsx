@@ -34,6 +34,7 @@ import { FoundingPhaseView } from './components/FoundingPhaseView.js';
 import { ElectionPhaseView } from './components/ElectionPhaseView.js';
 import { GovernorBanner } from './components/GovernorBanner.js';
 import { ImpeachmentModal } from './components/ImpeachmentModal.js';
+import { BuyMeACoffeeButton } from './components/BuyMeACoffeeButton.js';
 import { Anchor, LogOut, Lock, BatteryCharging, Scroll, Gavel } from 'lucide-react';
 
 export default function App() {
@@ -1336,6 +1337,9 @@ export default function App() {
           />
         </div>
       )}
+
+      {/* Floating Buy Me a Coffee button (Aeon-Fall / Emberlight standard) */}
+      <BuyMeACoffeeButton />
     </div>
   );
 }

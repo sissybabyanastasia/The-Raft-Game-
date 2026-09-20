@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Users, Plus, Play, Copy, Check, ArrowRight, Shield, Anchor, LogIn, UserCheck } from 'lucide-react';
 import type { GameData, PlayerData } from '../types.js';
+import { BuyMeACoffeeButton } from './BuyMeACoffeeButton.js';
 
 interface LobbyViewProps {
   currentUser: any;
@@ -411,9 +412,10 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           </div>
         </div>
 
-        {/* Footer Note */}
-        <div className="pt-4 border-t border-[#192435] text-center text-[11px] font-mono text-slate-500">
-          The raft accommodates 3 to 8 castaways. Lies are recorded permanently in ink.
+        {/* Footer Note and Support */}
+        <div className="pt-4 border-t border-[#192435] flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] font-mono text-slate-500">
+          <span>The raft accommodates 3 to 8 castaways. Lies are recorded permanently in ink.</span>
+          <BuyMeACoffeeButton variant="inline" />
         </div>
       </div>
     </main>
