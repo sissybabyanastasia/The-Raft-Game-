@@ -1,0 +1,147 @@
+{
+  "entities": {
+    "games": {
+      "title": "Games",
+      "description": "Active and past game rooms for THE RAFT",
+      "type": "object",
+      "properties": {
+        "roomCode": { "type": "string", "description": "6-character room code" },
+        "status": { "type": "string", "description": "lobby, active, or ended" },
+        "mode": { "type": "string", "description": "classic or satire" },
+        "round": { "type": "number", "description": "Current round number (1..N)" },
+        "raftStage": { "type": "string", "description": "Current raft construction stage: frame, deck, sail, provisions" },
+        "raftProgress": { "type": "object", "description": "Map of raft construction progress" },
+        "hostId": { "type": "string", "description": "UID of the room host" },
+        "gmNarration": { "type": "string", "description": "Current Game Master deadpan narration" },
+        "roundPhase": { "type": "string", "description": "founding, scavenge, resolution, ledger, election, launch, postlaunch" },
+        "constitution": { "type": "object", "description": "Ratified constitutional clauses" },
+        "governor": { "type": "object", "description": "Active governor office status" },
+        "activeElection": { "type": "object", "description": "Ongoing gubernatorial election" },
+        "activeImpeachment": { "type": "object", "description": "Active impeachment trial" },
+        "createdAt": { "type": "number", "description": "Timestamp when room was created" }
+      }
+    },
+    "players": {
+      "title": "Players",
+      "description": "Public player profile in a game room",
+      "type": "object",
+      "properties": {
+        "displayName": { "type": "string", "description": "Player's chosen display name" },
+        "energy": { "type": "number", "description": "Current energy points" },
+        "stash": { "type": "number", "description": "Public or observed hoarded resources" },
+        "reputation": { "type": "number", "description": "Current public reputation" },
+        "connected": { "type": "boolean", "description": "Connection status" },
+        "isHost": { "type": "boolean", "description": "Whether player is host" },
+        "handCount": { "type": "number", "description": "Number of scheme cards in hand" }
+      }
+    },
+    "privateProfile": {
+      "title": "Private Player Profile",
+      "description": "Secret player data visible only to the player",
+      "type": "object",
+      "properties": {
+        "role": { "type": "string", "description": "Secret archetype role" },
+        "roleRevealed": { "type": "boolean", "description": "Whether role card was viewed" },
+        "stash": { "type": "number", "description": "Actual private stash count" },
+        "hand": { "type": "array", "description": "Private scheme cards in hand" },
+        "brokerIntel": { "type": "array", "description": "Intel discovered as Broker" }
+      }
+    },
+    "rounds": {
+      "title": "Rounds",
+      "description": "Round submissions and resolution state",
+      "type": "object",
+      "properties": {
+        "submissions": { "type": "object", "description": "Player submission map with claimed and actual allocations" },
+        "resolved": { "type": "boolean", "description": "Whether all players submitted and round is resolved" },
+        "submittedPlayerIds": { "type": "array", "description": "List of player IDs who have submitted" }
+      }
+    },
+    "ledger": {
+      "title": "Ledger",
+      "description": "Public claimed labor log and round outcome",
+      "type": "object",
+      "properties": {
+        "entries": { "type": "object", "description": "Map of player ID to claimed labor" },
+        "publicTotal": { "type": "number", "description": "Sum of public claimed labor" },
+        "gmNarration": { "type": "string", "description": "Game Master summary for the round" },
+        "stageProgressStatus": { "type": "string", "description": "Vague description of raft movement" }
+      }
+    },
+    "publicLog": {
+      "title": "Public Log",
+      "description": "Public event notices on the beach",
+      "type": "object",
+      "properties": {
+        "text": { "type": "string", "description": "Notice description" },
+        "round": { "type": "number", "description": "Round number" },
+        "timestamp": { "type": "number", "description": "Event timestamp" }
+      }
+    },
+    "embezzlementLog": {
+      "title": "Embezzlement Log",
+      "description": "Evidence records of timber siphoned from the raft",
+      "type": "object",
+      "properties": {
+        "governorId": { "type": "string", "description": "UID of the embezzling Governor" },
+        "governorName": { "type": "string", "description": "Name of the Governor" },
+        "round": { "type": "number", "description": "Round when embezzlement occurred" },
+        "amount": { "type": "number", "description": "Amount siphoned" },
+        "source": { "type": "string", "description": "Timber batch source" },
+        "discovered": { "type": "boolean", "description": "Whether discovered by Auditor or Impeachment" },
+        "timestamp": { "type": "number", "description": "Timestamp recorded" }
+      }
+    },
+    "scorecard": {
+      "title": "Player Scorecard",
+      "description": "Post-game permanent performance record and historical judgment",
+      "type": "object",
+      "properties": {
+        "playerId": { "type": "string", "description": "Player identifier" },
+        "displayName": { "type": "string", "description": "Player display name" },
+        "escaped": { "type": "boolean", "description": "Whether player escaped" },
+        "fate": { "type": "string", "description": "escaped, left_behind, drowned, solo_escape" },
+        "cumulativeGap": { "type": "number", "description": "Total discrepancy between claimed and actual labor" },
+        "finalReputation": { "type": "number", "description": "Final reputation at endgame" },
+        "finalStash": { "type": "number", "description": "Final hoarded stash" },
+        "role": { "type": "string", "description": "Revealed archetype role" },
+        "markedByTable": { "type": "boolean", "description": "Whether stamped with scarlet mark by table" },
+        "confession": { "type": "string", "description": "Their final confession statement" }
+      }
+    }
+  },
+  "firestore": {
+    "/games/{gameId}": {
+      "schema": "games",
+      "description": "Top-level game state and phase progression"
+    },
+    "/games/{gameId}/players/{playerId}": {
+      "schema": "players",
+      "description": "Public castaway profiles"
+    },
+    "/games/{gameId}/players/{playerId}/private/profile": {
+      "schema": "privateProfile",
+      "description": "Confidential archetype, stash, and scheme hand"
+    },
+    "/games/{gameId}/rounds/{roundNum}": {
+      "schema": "rounds",
+      "description": "Round submissions and status"
+    },
+    "/games/{gameId}/ledger/{roundNum}": {
+      "schema": "ledger",
+      "description": "Public ledger entries and Game Master reports"
+    },
+    "/games/{gameId}/publicLog/{logId}": {
+      "schema": "publicLog",
+      "description": "Public expedition event log"
+    },
+    "/games/{gameId}/embezzlementLog/{logId}": {
+      "schema": "embezzlementLog",
+      "description": "Secret ledger of embezzled timber for investigations and impeachment"
+    },
+    "/games/{gameId}/scorecard/{playerId}": {
+      "schema": "scorecard",
+      "description": "Post-game scorecard and historical judgment"
+    }
+  }
+}

@@ -1,0 +1,115 @@
+import type { Archetype, ArchetypeDetails } from '../types.js';
+
+export const ARCHETYPES: Record<Archetype, ArchetypeDetails> = {
+  ORDINARY: {
+    type: 'ORDINARY',
+    name: 'The Ordinary',
+    tagline: 'The only honest soul on the beach.',
+    flavorText: '"You just want to go home. That\'s the whole plan. That\'s the whole tragedy."',
+    passiveTitle: 'None',
+    passiveDesc: 'No passive ability. (The joke: the only honest player.)',
+    activeTitle: 'None',
+    activeDesc: 'No active ability.',
+  },
+  PREPPER: {
+    type: 'PREPPER',
+    name: 'The Prepper',
+    tagline: 'Prepared for the catastrophe you secretly welcomed.',
+    flavorText: '"You packed for this. You always pack for this. Nobody else did."',
+    passiveTitle: 'Hoarded Cache',
+    passiveDesc: 'Starts the expedition with +4 secret Stash in reserve.',
+    activeTitle: 'Emergency Supplies',
+    activeDesc: 'Convert 2 Stash → 1 Labor without spending energy.',
+    buttonLabel: 'Use Prepper Stash',
+    defaultUses: 5,
+    cooldownRounds: 0,
+  },
+  BROKER: {
+    type: 'BROKER',
+    name: 'The Broker',
+    tagline: 'Every crisis has a toll taker.',
+    flavorText: '"Every crisis is a market. Every market has a middleman. You are the middleman."',
+    passiveTitle: 'Market Surveillance',
+    passiveDesc: 'At game start, privately sees one random opponent\'s exact stash total.',
+    activeTitle: 'Broker Deal',
+    activeDesc: 'Brokers a deal between two castaways, skimming 1 Stash from each into your stash.',
+    buttonLabel: 'Broker Deal',
+    defaultUses: 3,
+    cooldownRounds: 1,
+  },
+  IDEALIST: {
+    type: 'IDEALIST',
+    name: 'The Idealist',
+    tagline: 'A pure heart destined to carry the blame.',
+    flavorText: '"You believe in the raft. You believe in the group. You will be blamed for everything."',
+    passiveTitle: 'Civic Pride',
+    passiveDesc: 'Gain +2 Reputation whenever the raft advances to a new construction stage.',
+    activeTitle: 'Demand Audit',
+    activeDesc: 'Forces an immediate audit on any player. If the audit finds nothing, Idealist loses an additional 3 Reputation.',
+    buttonLabel: 'Demand Audit',
+    defaultUses: 3,
+    cooldownRounds: 0,
+  },
+  INFLUENCER: {
+    type: 'INFLUENCER',
+    name: 'The Influencer',
+    tagline: 'Perception is the only seaworthy vessel.',
+    flavorText: '"Perception is seaworthiness. You don\'t build the raft; you build the consensus."',
+    passiveTitle: 'Charismatic Spin',
+    passiveDesc: 'Claimed contributions grant +1 Reputation each round even if false.',
+    activeTitle: 'Public Endorsement',
+    activeDesc: 'Publicly endorse one castaway, transferring 2 Reputation to them to cement an alliance.',
+    buttonLabel: 'Endorse',
+    defaultUses: 3,
+    cooldownRounds: 0,
+  },
+  GHOST: {
+    type: 'GHOST',
+    name: 'The Ghost',
+    tagline: 'An unrecorded shadow in the manifest.',
+    flavorText: '"You were never on the manifest. You don\'t intend to start now."',
+    passiveTitle: 'Manifest Erasure',
+    passiveDesc: 'Your Ledger entry is always blank ("—") and audits on you return no data without revealing your identity.',
+    activeTitle: 'Mimicry',
+    activeDesc: 'Secretly copy another player\'s Scavenge action.',
+    buttonLabel: 'Mirror',
+    defaultUses: 2,
+    cooldownRounds: 1,
+  },
+  TYRANT: {
+    type: 'TYRANT',
+    name: 'The Tyrant',
+    tagline: 'Flourishing in collective ruin.',
+    flavorText: '"Chaos is merely uncollected dividend. When the timbers buckle, your hoard grows."',
+    passiveTitle: 'Disaster Profiteer',
+    passiveDesc: 'Whenever the raft fails to advance a stage in a round, gain +2 secret Stash.',
+    activeTitle: 'Executive Veto',
+    activeDesc: 'Veto one player\'s vote during any vote resolution.',
+    buttonLabel: 'Veto',
+    defaultUses: 2,
+    cooldownRounds: 1,
+  },
+  MAYOR: {
+    type: 'MAYOR',
+    name: 'The Mayor',
+    tagline: 'Custodianship of the official record.',
+    flavorText: '"The ink belongs to whoever holds the pen. The ledger says what order demands."',
+    passiveTitle: 'Ledger Oversight',
+    passiveDesc: 'Controls the public Ledger display — can nudge any claimed number ±1 without triggering an audit.',
+    activeTitle: 'Emergency Assembly',
+    activeDesc: 'Once per game, call an emergency vote that skips a Scavenge phase.',
+    buttonLabel: 'Emergency Vote',
+    defaultUses: 1,
+    cooldownRounds: 99,
+  },
+};
+
+export function getRosterForPlayerCount(count: number): Archetype[] {
+  if (count <= 4) {
+    return ['ORDINARY', 'PREPPER', 'BROKER', 'IDEALIST'];
+  } else if (count <= 6) {
+    return ['ORDINARY', 'PREPPER', 'BROKER', 'IDEALIST', 'INFLUENCER', 'GHOST'];
+  } else {
+    return ['ORDINARY', 'PREPPER', 'BROKER', 'IDEALIST', 'INFLUENCER', 'GHOST', 'TYRANT', 'MAYOR'];
+  }
+}
