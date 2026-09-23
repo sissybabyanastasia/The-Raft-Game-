@@ -326,6 +326,12 @@ export async function joinGameRoom(roomCode: string, playerId: string, playerNam
   return { gameId: normalizedCode, roomCode: normalizedCode };
 }
 
+export async function updatePreferredRole(gameId: string, playerId: string, preferredRole: string) {
+  const playerRef = doc(db, `games/${gameId}/players`, playerId);
+  await updateDoc(playerRef, { preferredRole });
+  return { success: true, preferredRole };
+}
+
 export async function addDemoCastaway(gameId: string, botName?: string) {
   const botNames = ['Ezekiel', 'Barnaby', 'Silas', 'Cordelia', 'Thaddeus', 'Miriam', 'Orville', 'Agnes'];
   const playersRef = collection(db, `games/${gameId}/players`);
@@ -394,14 +400,43 @@ export async function startGame(gameId: string, hostId: string) {
     discarded: [],
   });
 
-  // Assign roles and initial 2 Scheme cards for each player
+  // Assign roles and initial 2 Scheme cards for each player, respecting preferredRole
   const assignedRoles: Record<string, { role: Archetype; stash: number; activeUses: number }> = {};
-  for (let i = 0; i < playersList.length; i++) {
-    const p = playersList[i];
-    const role = shuffledRoster[i % shuffledRoster.length];
-    const initialStash = role === 'PREPPER' ? 4 : 0;
-    const activeUses = ARCHETYPES[role]?.defaultUses ?? 0;
-    assignedRoles[p.id] = { role, stash: initialStash, activeUses };
+  const availableRoles = [...availableRoster].sort(() => Math.random() - 0.5);
+
+  // Shuffle players list to ensure fairness if multiple players request the same preferred role
+  const shuffledPlayers = [...playersList].sort(() => Math.random() - 0.5);
+
+  // First pass: satisfy preferred roles (except ORDINARY)
+  for (const p of shuffledPlayers) {
+    const pref = (p as any).preferredRole as Archetype | undefined;
+    if (pref && pref !== 'ORDINARY' && availableRoles.includes(pref)) {
+      const idx = availableRoles.indexOf(pref);
+      availableRoles.splice(idx, 1);
+      const initialStash = pref === 'PREPPER' ? 4 : 0;
+      const activeUses = ARCHETYPES[pref]?.defaultUses ?? 0;
+      assignedRoles[p.id] = { role: pref, stash: initialStash, activeUses };
+    }
+  }
+
+  // Second pass: satisfy players requesting 'ORDINARY' specifically
+  for (const p of shuffledPlayers) {
+    if (assignedRoles[p.id]) continue;
+    const pref = (p as any).preferredRole as Archetype | undefined;
+    if (pref === 'ORDINARY' && availableRoles.includes('ORDINARY')) {
+      const idx = availableRoles.indexOf('ORDINARY');
+      availableRoles.splice(idx, 1);
+      assignedRoles[p.id] = { role: 'ORDINARY', stash: 0, activeUses: 0 };
+    }
+  }
+
+  // Third pass: assign remaining available roles to everyone else
+  for (const p of shuffledPlayers) {
+    if (assignedRoles[p.id]) continue;
+    const fallbackRole = availableRoles.pop() || 'ORDINARY';
+    const initialStash = fallbackRole === 'PREPPER' ? 4 : 0;
+    const activeUses = ARCHETYPES[fallbackRole]?.defaultUses ?? 0;
+    assignedRoles[p.id] = { role: fallbackRole, stash: initialStash, activeUses };
   }
 
   for (const p of playersList) {

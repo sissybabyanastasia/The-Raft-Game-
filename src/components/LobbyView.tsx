@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Users, Plus, Play, Copy, Check, ArrowRight, Shield, Anchor, LogIn, UserCheck } from 'lucide-react';
 import type { GameData, PlayerData } from '../types.js';
 import { BuyMeACoffeeButton } from './BuyMeACoffeeButton.js';
+import { TutorialModal } from './TutorialModal.js';
 
 interface LobbyViewProps {
   currentUser: any;
@@ -15,6 +16,7 @@ interface LobbyViewProps {
   onAddBot: () => Promise<void>;
   onGoogleSignIn?: () => Promise<void>;
   onToggleMode?: (mode: 'classic' | 'satire') => void;
+  onSelectPreferredRole?: (role: string) => Promise<void>;
   isLoading: boolean;
   error: string | null;
   setError: (err: string | null) => void;
@@ -32,12 +34,14 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   onAddBot,
   onGoogleSignIn,
   onToggleMode,
+  onSelectPreferredRole,
   isLoading,
   error,
   setError,
 }) => {
   const [roomCodeInput, setRoomCodeInput] = useState('');
   const [copied, setCopied] = useState(false);
+  const [isTutorialOpen, setIsTutorialOpen] = useState(false);
 
   const isHost = currentGame && currentUser && currentGame.hostId === currentUser.uid;
   // FIX-17: Explicit upper bound so the button is disabled when the room is full.
@@ -202,9 +206,39 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                             </span>
                           )}
                         </div>
-                        <div className="text-[11px] font-mono text-slate-500">
+                         <div className="text-[11px] font-mono text-slate-500">
                           Status: Ready in Camp • Base Energy: 5
                         </div>
+                        {isMe && (
+                          <div className="mt-1.5 flex items-center gap-1.5">
+                            <label htmlFor="pref-role-select" className="text-[10px] font-mono text-slate-400">
+                              Pref:
+                            </label>
+                            <select
+                              id="pref-role-select"
+                              value={(p as any).preferredRole || ''}
+                              onChange={(e) => onSelectPreferredRole?.(e.target.value)}
+                              className="bg-[#0b101a] border border-[#23354d] rounded px-1.5 py-0.5 text-[10px] font-serif text-amber-300 focus:outline-none focus:border-amber-500"
+                            >
+                              <option value="">Random / Any</option>
+                              <option value="ORDINARY">Ordinary Person</option>
+                              <option value="PREPPER">The Prepper</option>
+                              <option value="BROKER">The Broker</option>
+                              <option value="IDEALIST">The Idealist</option>
+                              <option value="INFLUENCER">The Influencer</option>
+                              <option value="GHOST">The Ghost</option>
+                              <option value="TYRANT">The Tyrant</option>
+                              <option value="MAYOR">The Mayor</option>
+                            </select>
+                          </div>
+                        )}
+                        {!isMe && (p as any).preferredRole && (
+                          <div className="mt-1 flex items-center gap-1">
+                            <span className="text-[9px] font-mono text-amber-400/80 bg-amber-950/20 px-1 py-0.5 rounded border border-amber-900/30">
+                              Pref: {(p as any).preferredRole}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -295,6 +329,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
             • The group must produce genuine timber to assemble the raft before rations expire.
           </p>
         </div>
+        <TutorialModal isOpen={isTutorialOpen} onClose={() => setIsTutorialOpen(false)} />
       </main>
     );
   }
@@ -315,6 +350,16 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           <p className="text-xs sm:text-sm font-mono text-slate-400 mt-2 max-w-md mx-auto leading-relaxed">
             Castaways cooperating to build an escape craft while hoarding resources and lying upon the public ledger.
           </p>
+          <div className="mt-4">
+            <button
+              id="tutorial-walkthrough-btn"
+              type="button"
+              onClick={() => setIsTutorialOpen(true)}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/40 text-amber-300 font-mono text-xs font-bold uppercase transition-all shadow-md shadow-amber-950/20 active:scale-95"
+            >
+              📖 Open Thorough Survival Walkthrough Guide
+            </button>
+          </div>
         </div>
 
         {/* Name Input & Account */}
@@ -418,6 +463,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           <span>The raft accommodates 3 to 8 castaways. Lies are recorded permanently in ink.</span>
           <BuyMeACoffeeButton variant="inline" />
         </div>
+        <TutorialModal isOpen={isTutorialOpen} onClose={() => setIsTutorialOpen(false)} />
       </div>
     </main>
   );

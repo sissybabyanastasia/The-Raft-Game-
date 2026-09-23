@@ -35,6 +35,7 @@ import { ElectionPhaseView } from './components/ElectionPhaseView.js';
 import { GovernorBanner } from './components/GovernorBanner.js';
 import { ImpeachmentModal } from './components/ImpeachmentModal.js';
 import { BuyMeACoffeeButton } from './components/BuyMeACoffeeButton.js';
+import { TutorialModal } from './components/TutorialModal.js';
 import { Anchor, LogOut, Lock, BatteryCharging, Scroll, Gavel } from 'lucide-react';
 
 export default function App() {
@@ -55,6 +56,7 @@ export default function App() {
   const [isRoleModalOpen, setIsRoleModalOpen] = useState<boolean>(false);
   const [isDossierOpen, setIsDossierOpen] = useState<boolean>(false);
   const [isConstitutionOpen, setIsConstitutionOpen] = useState<boolean>(false);
+  const [isTutorialOpen, setIsTutorialOpen] = useState<boolean>(false);
   const [selectedScavengeCard, setSelectedScavengeCard] = useState<SchemeCardId | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -286,6 +288,29 @@ export default function App() {
       setGameId(data.gameId);
     } catch (err: any) {
       setError(err.message || 'Error joining expedition');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSelectPreferredRole = async (role: string) => {
+    if (!currentUser || !currentGameId) return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/game/preferred-role', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          gameId: currentGameId,
+          playerId: currentUser.uid,
+          preferredRole: role,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to select preferred role');
+    } catch (err: any) {
+      setError(err.message || 'Error updating preferred role');
     } finally {
       setIsLoading(false);
     }
@@ -1072,6 +1097,17 @@ export default function App() {
 
         {currentGameId && game && (
           <div className="flex items-center gap-3">
+            {/* Survival Walkthrough Guide Button */}
+            <button
+              id="open-guide-btn"
+              onClick={() => setIsTutorialOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-[#1c1d1a] hover:bg-[#2c2e28] border border-[#3e4235] text-amber-400 hover:text-amber-300 transition-colors shadow-sm"
+              title="Open Survival Walkthrough Guide"
+            >
+              <span>📖</span>
+              <span className="font-bold">Survival Guide</span>
+            </button>
+
             {/* Constitution Drawer Button */}
             {game.constitution && (
               <button
@@ -1143,6 +1179,7 @@ export default function App() {
             onAddBot={handleAddBot}
             onGoogleSignIn={handleGoogleSignIn}
             onToggleMode={handleToggleMode}
+            onSelectPreferredRole={handleSelectPreferredRole}
             isLoading={isLoading}
             error={error}
             setError={setError}
@@ -1342,6 +1379,9 @@ export default function App() {
 
       {/* Floating Buy Me a Coffee button (Aeon-Fall / Emberlight standard) */}
       <BuyMeACoffeeButton />
+
+      {/* Shared Survival Walkthrough Modal */}
+      <TutorialModal isOpen={isTutorialOpen} onClose={() => setIsTutorialOpen(false)} />
     </div>
   );
 }

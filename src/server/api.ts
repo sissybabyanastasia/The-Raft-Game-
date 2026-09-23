@@ -2,6 +2,7 @@ import express, { Request, Response } from 'express';
 import {
   createGameRoom,
   joinGameRoom,
+  updatePreferredRole,
   addDemoCastaway,
   startGame,
   submitAllocation,
@@ -108,6 +109,21 @@ apiRouter.post('/game/join', async (req: Request, res: Response) => {
     res.json(result);
   } catch (error: any) {
     console.error('Join game error:', error);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// Update preferred role
+apiRouter.post('/game/preferred-role', async (req: Request, res: Response) => {
+  try {
+    const { gameId, playerId, preferredRole } = req.body;
+    if (!gameId || !playerId || preferredRole === undefined) {
+      return res.status(400).json({ error: 'gameId, playerId, and preferredRole are required' });
+    }
+    const result = await updatePreferredRole(gameId, playerId, preferredRole);
+    res.json(result);
+  } catch (error: any) {
+    console.error('Update preferred role error:', error);
     res.status(400).json({ error: error.message });
   }
 });
