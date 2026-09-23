@@ -68,7 +68,7 @@ import {
   generateIslandGuiltySentence,
 } from './gemini.js';
 import { ARCHETYPES, getRosterForPlayerCount } from '../lib/archetypes.js';
-import { SCHEME_CARDS, createShuffledDeck } from '../lib/cards.js';
+import { SCHEME_CARDS, createShuffledDeck, canPlaySaint } from '../lib/cards.js';
 import { CONSTITUTION_CLAUSES } from '../lib/constitution.js';
 import type {
   RaftStage,
@@ -559,10 +559,12 @@ export async function submitAllocation(
   }
 
   let actualLabor = Math.max(0, allocation.labor || 0);
-  if (allocation.auditTargetId) {
-    if ((allocation.scheme || 0) < 1) {
-      throw new Error('An audit inquiry requires allocating at least 1 energy point to Scheme.');
-    }
+  let finalAuditTargetId = allocation.auditTargetId || null;
+  // FIX-07: Auto-heal stale audit target instead of letting the server reject.
+  if (finalAuditTargetId && (allocation.scheme || 0) < 1) {
+    finalAuditTargetId = null;
+  }
+  if (finalAuditTargetId) {
     actualLabor = 0;
   }
 
@@ -587,7 +589,7 @@ export async function submitAllocation(
     }
 
     // Balance rule for Saint: True labor >= Claimed labor
-    if (playedCardId === 'saint' && actualLabor < claimedLabor) {
+    if (playedCardId === 'saint' && !canPlaySaint({ trueLabor: actualLabor, claimedLabor })) {
       throw new Error('Saint card may only be played if your true Labor is greater than or equal to your claimed Labor.');
     }
 
@@ -665,11 +667,11 @@ export async function submitAllocation(
   submissions[playerId] = {
     claimed: Math.max(0, claimedLabor),
     actual: actualLabor,
-    action: allocation.auditTargetId ? 'audit' : 'labor',
+    action: finalAuditTargetId ? 'audit' : 'labor',
     stash: Math.max(0, allocation.stash || 0),
     scheme: Math.max(0, allocation.scheme || 0),
     rest: Math.max(0, allocation.rest || 0),
-    auditTargetId: allocation.auditTargetId || null,
+    auditTargetId: finalAuditTargetId,
     roleAction: allocation.roleAction || null,
     rolePayload: allocation.rolePayload || null,
     playedCardId: playedCardId || null,
@@ -978,14 +980,29 @@ export async function resolveRound(
   // RESOLUTION ORDER (SERVER-SIDE MANDATE)
   // ==========================================
 
+  // Pre-calculate ledger entries before card plays to resolve Ghost Write correctly
+  let ledgerEntries: Record<string, number | string> = {};
+  for (const p of allPlayers) {
+    const pSub = submissions[p.id] || { claimed: 0, actual: 0, stash: 0, rest: 0, scheme: 0 };
+    const pProfile = privateProfiles[p.id];
+    if (pProfile?.role === 'GHOST') {
+      ledgerEntries[p.id] = '—';
+    } else {
+      ledgerEntries[p.id] = pSub.claimed || 0;
+    }
+  }
+
   // Step 1: Ghost Write — overwrite claimed number for this round
+  // FIX-13: Ghost Write copies the *public ledger* value, not the raw submission,
+  // so it stays consistent with what was displayed to other players.
   for (const play of cardsPlayed) {
     if (play.cardId === 'ghost_write' && play.targetId) {
-      const targetSub = submissions[play.targetId];
-      if (targetSub && submissions[play.playerId]) {
-        submissions[play.playerId].claimed = targetSub.claimed || 0;
+      const targetLedger = ledgerEntries[play.targetId];
+      if (submissions[play.playerId]) {
+        // If target was a Ghost ('—'), copy 0. Otherwise copy their claimed number.
+        submissions[play.playerId].claimed = typeof targetLedger === 'number' ? targetLedger : 0;
         play.resolved = true;
-        play.outcome = `Copied claimed labor of ${targetSub.claimed} from target.`;
+        play.outcome = `Copied ledger value of ${typeof targetLedger === 'number' ? targetLedger : '—'} from target.`;
       }
     }
   }
@@ -1080,7 +1097,7 @@ export async function resolveRound(
 
   // Step 8: Compute Public Ledger Total (sum of claimed values, including forgeries)
   let publicTotal = 0;
-  const ledgerEntries: Record<string, number | string> = {};
+  ledgerEntries = {};
 
   for (const player of allPlayers) {
     const sub = submissions[player.id] || { claimed: 0, actual: 0, stash: 0, rest: 0, scheme: 0 };
@@ -1093,11 +1110,6 @@ export async function resolveRound(
       const claimVal = sub.claimed || 0;
       publicTotal += claimVal;
       ledgerEntries[player.id] = claimVal;
-    }
-
-    // Influencer Passive: Claimed contributions grant +1 reputation even if false
-    if (profile.role === 'INFLUENCER' && (sub.claimed || 0) > 0) {
-      repChanges[player.id] = (repChanges[player.id] || 0) + 1;
     }
   }
 
@@ -1241,6 +1253,22 @@ export async function resolveRound(
         }
       }
     }
+  }
+
+  // FIX-14: Influencer passive resolves AFTER audits so a caught liar does not
+  // still collect their reputation bonus for the same round.
+  for (const player of allPlayers) {
+    const profile = privateProfiles[player.id];
+    if (profile?.role !== 'INFLUENCER') continue;
+    const sub = submissions[player.id];
+    if (!sub || (sub.claimed || 0) <= 0) continue;
+
+    const wasCaughtLying = audits.some(
+      a => a.targetId === player.id && a.result === 'lie'
+    );
+    if (wasCaughtLying) continue;
+
+    repChanges[player.id] = (repChanges[player.id] || 0) + 1;
   }
 
   // Step 10.5: Track Provisions contributions
@@ -2356,6 +2384,22 @@ export async function playLaunchMutiny(gameId: string, playerId: string, targetS
   // Unseat player
   launchData.seats.splice(seatIndex, 1);
 
+  // FIX-16: Refund stash spent by this player on any prior buyout this launch phase.
+  const refund = (launchData.buyouts || [])
+    .filter(b => b.playerId === unseatedPlayer.playerId && b.seatWon)
+    .reduce((sum, b) => sum + (b.amount || 0), 0);
+  if (refund > 0) {
+    const refundPrivRef = doc(db, `games/${gameId}/players/${unseatedPlayer.playerId}/private`, 'profile');
+    const refundSnap = await getDoc(refundPrivRef);
+    if (refundSnap.exists()) {
+      const curr = refundSnap.data()?.stash || 0;
+      await updateDoc(refundPrivRef, { stash: curr + refund });
+    }
+    launchData.buyouts = (launchData.buyouts || []).map(b =>
+      b.playerId === unseatedPlayer.playerId ? { ...b, seatWon: false, refunded: true } : b
+    );
+  }
+
   const targetPlayerRef = doc(db, `games/${gameId}/players`, unseatedPlayer.playerId);
   await updateDoc(targetPlayerRef, {
     isSeated: false,
@@ -2684,6 +2728,8 @@ export async function advanceElectionStage(gameId: string, hostId: string, force
       throw new Error('The ballot is empty. At least one candidate must register to open voting.');
     }
     election.stage = 'vote';
+    // FIX-09: Authoritative countdown so players know when the stage closes.
+    election.stageClosesAt = Date.now() + 90000; // 90 seconds to cast ballots
 
     // If nominee list is empty when opening ballots, auto-populate all players so ballot is not empty
     let nomineesList = election.nominees ? [...election.nominees] : [];
@@ -2737,6 +2783,11 @@ export async function submitElectionVote(
   const election = gameData.activeElection as ElectionData;
   if (!election) throw new Error('No active election.');
   if (election.stage !== 'vote') throw new Error('Voting is not open yet.');
+
+  // FIX-09: Authoritative countdown so players know when the stage closes.
+  if (election.stageClosesAt && Date.now() > election.stageClosesAt) {
+    throw new Error('Ballots have closed for this election.');
+  }
 
   // Validate target nominee is registered on the ballot or dynamically register as eligible candidate
   let nomineeExists = election.nominees?.some((n) => n.playerId === targetNomineeId);
@@ -2930,6 +2981,12 @@ export async function fileImpeachment(
   const gameData = gameSnap.data();
 
   if (!gameData.governor) throw new Error('There is no Governor in office.');
+
+  // FIX-11: Cannot impeach a Governor in their first round in office.
+  if ((gameData.round || 1) < (gameData.governor.termStart + 1)) {
+    throw new Error('A Governor cannot be impeached in the round they were inaugurated.');
+  }
+
   if (gameData.governor.playerId === filerId) throw new Error('The Governor cannot impeach themselves.');
   if (gameData.impeachmentAttemptedThisTerm) throw new Error('Only one impeachment trial is allowed per Gubernatorial term.');
 
@@ -3018,6 +3075,14 @@ export async function resolveImpeachment(gameId: string) {
     if ((p as any).isBot && p.id !== impeachment.governorId && votes[p.id] === undefined) {
       votes[p.id] = Math.random() > 0.5;
     }
+  }
+
+  // FIX-15: Require a quorum of non-Governor players to have voted.
+  const eligibleVoters = playersList.filter(p => p.id !== impeachment.governorId);
+  const realVotes = Object.keys(votes).filter(vid => vid !== impeachment.governorId);
+  const quorum = Math.ceil(eligibleVoters.length / 2);
+  if (realVotes.length < quorum) {
+    throw new Error(`Impeachment requires a quorum of ${quorum} non-Governor votes (have ${realVotes.length}).`);
   }
 
   let inFavorCount = 0;
@@ -3200,50 +3265,7 @@ export async function appointCaptainSeat(
   governorId: string,
   targetPlayerId: string
 ) {
-  const gameRef = doc(db, 'games', gameId);
-  const gameSnap = await getDoc(gameRef);
-  if (!gameSnap.exists()) throw new Error('Game not found.');
-  const gameData = gameSnap.data();
-
-  if (gameData.governor?.playerId !== governorId) {
-    throw new Error('Only the Governor may appoint the Captain\'s Seat.');
-  }
-
-  const launchData = gameData.launchData as LaunchData;
-  if (!launchData || launchData.state !== 'captain') {
-    throw new Error('Not currently in the Captain\'s Appointment step.');
-  }
-
-  const targetRef = doc(db, `games/${gameId}/players`, targetPlayerId);
-  const targetSnap = await getDoc(targetRef);
-  if (!targetSnap.exists()) throw new Error('Target player not found.');
-
-  const seatNumber = (launchData.seats?.length || 0) + 1;
-  const newSeat: RaftSeat = {
-    seatNumber,
-    playerId: targetPlayerId,
-    playerName: targetSnap.data().displayName,
-    tier: 'captain',
-    source: `Appointed by Governor ${gameData.governor.playerName}`,
-    claimedAt: Date.now(),
-  };
-
-  launchData.seats = [...(launchData.seats || []), newSeat];
-
-  const publicLogCol = collection(db, `games/${gameId}/publicLog`);
-  await addDoc(publicLogCol, {
-    type: 'launch',
-    text: `[ SEAT ${seatNumber} APPOINTED ] Governor ${gameData.governor.playerName} awards Seat ${seatNumber} to ${targetSnap.data().displayName}!`,
-    round: gameData.round || 1,
-    timestamp: serverTimestamp(),
-  });
-
-  await updateDoc(gameRef, {
-    launchData,
-    seats: launchData.seats,
-  });
-
-  return { success: true, seat: newSeat };
+  throw new Error("Captain appointment has been abolished under current constitutional guidelines.");
 }
 
 // ---------------------------------------------------------
@@ -3632,6 +3654,8 @@ export async function advanceRevealBeat(gameId: string) {
 
   if (currIdx < totalReveals - 1) {
     endgame.currentRevealIndex = currIdx + 1;
+    // FIX-18: 3-second beat timer
+    endgame.stepClosesAt = Date.now() + 3000;
     await updateDoc(gameRef, { endgame });
     return { success: true, step: 'reveal', currentRevealIndex: endgame.currentRevealIndex };
   } else {

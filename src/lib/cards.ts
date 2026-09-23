@@ -114,3 +114,11 @@ export function createShuffledDeck(cardCopies = 3): SchemeCardId[] {
   }
   return deck;
 }
+
+// FIX-12: Single source of truth for Saint eligibility.
+export function canPlaySaint(params: {
+  trueLabor: number;
+  claimedLabor: number;
+}): boolean {
+  return params.trueLabor >= params.claimedLabor;
+}

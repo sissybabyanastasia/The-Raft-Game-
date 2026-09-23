@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Landmark, Vote, Award, CheckCircle2, User, AlertCircle, ArrowRight, Plus } from 'lucide-react';
 import type { GameData, PlayerData, PrivatePlayerProfile, ElectionNominee } from '../types.js';
 
@@ -38,6 +38,16 @@ export const ElectionPhaseView: React.FC<ElectionPhaseViewProps> = ({
   const stage = election?.stage || 'nomination';
   const serverNominees = election?.nominees || [];
   const votes = election?.votes || {};
+
+  // FIX-09: Authoritative countdown so players know when the stage closes.
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+  const stageClosesAt = election?.stageClosesAt;
+  const secondsLeft = stageClosesAt ? Math.max(0, Math.ceil((stageClosesAt - now) / 1000)) : null;
+  const voteOpen = stage === 'vote' && (secondsLeft === null || secondsLeft > 0);
 
   const [promiseInput, setPromiseInput] = useState('');
   const [selectedVoteNomineeId, setSelectedVoteNomineeId] = useState<string>('');
@@ -139,10 +149,26 @@ export const ElectionPhaseView: React.FC<ElectionPhaseViewProps> = ({
             </div>
           </div>
 
-          <div className="bg-[#0a101b] border border-[#1b263b] px-4 py-2.5 rounded text-right font-mono">
-            <div className="text-[10px] uppercase text-slate-500">Election Stage</div>
-            <div className="text-sm font-bold text-amber-400 uppercase">
-              {stage}
+          <div className="flex items-center gap-2">
+            {stage === 'vote' && (
+              <div className={`px-3 py-1.5 rounded font-mono text-xs font-bold ${
+                secondsLeft !== null && secondsLeft <= 5
+                  ? 'bg-red-950/60 border border-red-700 text-red-300 animate-pulse'
+                  : 'bg-[#121c2e] border border-[#22334b] text-amber-400'
+              }`}>
+                {secondsLeft === null
+                  ? 'Awaiting host to close ballots'
+                  : secondsLeft > 0
+                    ? `Ballots close in ${Math.floor(secondsLeft / 60)}m ${String(secondsLeft % 60).padStart(2, '0')}s`
+                    : 'Ballots closed'}
+              </div>
+            )}
+
+            <div className="bg-[#0a101b] border border-[#1b263b] px-4 py-2.5 rounded text-right font-mono">
+              <div className="text-[10px] uppercase text-slate-500">Election Stage</div>
+              <div className="text-sm font-bold text-amber-400 uppercase">
+                {stage}
+              </div>
             </div>
           </div>
         </div>
@@ -332,12 +358,12 @@ export const ElectionPhaseView: React.FC<ElectionPhaseViewProps> = ({
                       <button
                         id={`vote-candidate-${nom.playerId}-btn`}
                         onClick={() => handleVoteSubmit(nom.playerId)}
-                        disabled={isLoading}
+                        disabled={isLoading || !voteOpen}
                         className={`px-4 py-2 rounded text-xs font-mono font-bold uppercase tracking-wider transition-colors ${
                           isSelected
                             ? 'bg-amber-500 text-slate-950 ring-1 ring-amber-400 font-extrabold shadow-md'
                             : 'bg-[#152236] hover:bg-[#1e2e48] border border-[#273852] text-slate-200'
-                        }`}
+                        } disabled:opacity-40 disabled:cursor-not-allowed`}
                       >
                         {isSelected ? '✓ Voted' : 'Vote'}
                       </button>

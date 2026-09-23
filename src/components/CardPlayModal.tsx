@@ -12,7 +12,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import type { SchemeCardId, SchemeCardDefinition, PlayerData, PrivatePlayerProfile } from '../types.js';
-import { SCHEME_CARDS } from '../lib/cards.js';
+import { SCHEME_CARDS, canPlaySaint } from '../lib/cards.js';
 
 interface CardPlayModalProps {
   cardId: SchemeCardId | null;
@@ -59,7 +59,10 @@ export const CardPlayModal: React.FC<CardPlayModalProps> = ({
     (card.timing === 'resolution' && currentPhase === 'resolution' && isWindowActive);
 
   // Saint validation
-  const isSaintValid = cardId !== 'saint' || currentLabor >= currentClaimedLabor;
+  const isSaintValid = cardId !== 'saint' || canPlaySaint({
+    trueLabor: currentLabor,
+    claimedLabor: currentClaimedLabor,
+  });
 
   const handleConfirm = async () => {
     if (isSubmitting || isLoading) return;

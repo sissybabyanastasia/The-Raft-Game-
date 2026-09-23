@@ -155,8 +155,10 @@ export const GovernorBanner: React.FC<GovernorBannerProps> = ({
             </>
           )}
 
-          {/* Non-Governor: Impeachment */}
-          {!isGovernor && governor && game.roundPhase === 'scavenge' && !game.impeachmentAttemptedThisTerm && (
+          {/* FIX-11: Cannot impeach a Governor in their first round in office. */}
+          {!isGovernor && governor && game.roundPhase === 'scavenge' && 
+           !game.impeachmentAttemptedThisTerm && 
+           game.round >= (governor.termStart + 1) && (
             <button
               id="file-impeachment-btn"
               onClick={onFileImpeachment}

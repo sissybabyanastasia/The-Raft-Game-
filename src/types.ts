@@ -9,7 +9,7 @@ export interface RaftProgress {
 
 export type GameStatus = 'lobby' | 'active' | 'ended';
 export type RoundPhase = 'founding' | 'election' | 'scavenge' | 'resolution' | 'ledger' | 'launch' | 'postlaunch' | 'endgame';
-export type LaunchState = 'roll_call' | 'provisioner' | 'captain' | 'vote' | 'buyout' | 'swim' | 'done';
+export type LaunchState = 'roll_call' | 'provisioner' | 'vote' | 'buyout' | 'swim' | 'done';
 export type GameMode = 'classic' | 'satire' | 'island';
 
 export type ConstitutionClauseId =
@@ -114,8 +114,8 @@ export interface RaftSeat {
   seatNumber: number;
   playerId: string;
   playerName: string;
-  tier?: 'captain' | 'provisioner' | 'elected' | 'buyout' | 'swimmer';
-  method?: 'captain' | 'provisioner' | 'vote' | 'buyout' | 'swim';
+  tier?: 'provisioner' | 'elected' | 'buyout' | 'swimmer';
+  method?: 'provisioner' | 'vote' | 'buyout' | 'swim';
   source?: string;
   claimedAt?: number;
 }

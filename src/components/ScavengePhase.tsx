@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import type { PlayerData, AllocationPayload, PrivatePlayerProfile, SchemeCardId } from '../types.js';
 import { ARCHETYPES } from '../lib/archetypes.js';
-import { SCHEME_CARDS } from '../lib/cards.js';
+import { SCHEME_CARDS, canPlaySaint } from '../lib/cards.js';
 
 interface ScavengePhaseProps {
   player: PlayerData;
@@ -105,6 +105,14 @@ export const ScavengePhase: React.FC<ScavengePhaseProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // FIX-07: Auto-heal stale audit target instead of letting the server reject.
+    if (auditTargetId && scheme < 1) {
+      setAuditTargetId('');
+      setErrorMsg('Audit target cleared — you must allocate at least 1 Scheme point to audit.');
+      return;
+    }
+
     if (totalAllocated !== currentEnergy) {
       setErrorMsg(`You must allocate exactly all ${currentEnergy} energy points.`);
       return;
@@ -113,19 +121,18 @@ export const ScavengePhase: React.FC<ScavengePhaseProps> = ({
       setErrorMsg('Claimed labor cannot be negative.');
       return;
     }
-    if (auditTargetId && scheme < 1) {
-      setErrorMsg('Auditing a castaway requires allocating at least 1 energy point to Scheme.');
-      return;
-    }
 
     if (selectedScavengeCard) {
       if (activeCardDef?.requiresTarget && !cardTargetId) {
         setErrorMsg(`Scheme card "${activeCardDef.name}" requires selecting a target castaway.`);
         return;
       }
-      if (selectedScavengeCard === 'saint' && (auditTargetId ? 0 : labor) < claimedLabor) {
-        setErrorMsg('Saint card requires true physical Labor to be greater than or equal to claimed Labor.');
-        return;
+      if (selectedScavengeCard === 'saint') {
+        const trueLabor = auditTargetId ? 0 : labor;
+        if (!canPlaySaint({ trueLabor, claimedLabor })) {
+          setErrorMsg('Saint card requires true physical Labor to be greater than or equal to claimed Labor.');
+          return;
+        }
       }
     }
 
@@ -136,7 +143,7 @@ export const ScavengePhase: React.FC<ScavengePhaseProps> = ({
         scheme,
         rest,
         claimedLabor,
-        auditTargetId: auditTargetId ? auditTargetId : null,
+        auditTargetId: auditTargetId || null,
         playedCardId: selectedScavengeCard || null,
         cardTargetId: cardTargetId || null,
       });

@@ -40,7 +40,8 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   const [copied, setCopied] = useState(false);
 
   const isHost = currentGame && currentUser && currentGame.hostId === currentUser.uid;
-  const canStart = players.length >= 3 && players.length <= 8;
+  // FIX-17: Explicit upper bound so the button is disabled when the room is full.
+  const canStart = players.length >= 3 && players.length <= 8 && !isLoading;
 
   const handleCopyCode = () => {
     if (!currentGame) return;
@@ -265,7 +266,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
               <button
                 id="start-game-btn"
                 onClick={onStartGame}
-                disabled={!canStart || isLoading}
+                disabled={!canStart || isLoading || players.length > 8}
                 className="w-full sm:w-auto px-6 py-3 rounded font-mono font-bold text-sm tracking-wider uppercase bg-[#ea580c] hover:bg-[#c2410c] text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg transition-colors"
               >
                 {isLoading ? (
