@@ -7,6 +7,7 @@ interface RaftStatusCardProps {
   currentStage: RaftStage;
   progress: RaftProgress;
   vagueStatus?: string;
+  onOpenGuide?: () => void;
 }
 
 const STAGE_LABELS: Record<RaftStage, { name: string; desc: string; icon: string }> = {
@@ -36,6 +37,7 @@ export const RaftStatusCard: React.FC<RaftStatusCardProps> = ({
   currentStage,
   progress,
   vagueStatus,
+  onOpenGuide,
 }) => {
   const stages: RaftStage[] = ['frame', 'deck', 'sail', 'provisions'];
   const currentStageIndex = stages.indexOf(currentStage);
@@ -52,6 +54,16 @@ export const RaftStatusCard: React.FC<RaftStatusCardProps> = ({
             <span className="text-slate-400 font-mono text-xs uppercase">
               Stage {currentStageIndex + 1} of 4: {STAGE_LABELS[currentStage]?.name}
             </span>
+            {onOpenGuide && (
+              <button
+                type="button"
+                onClick={onOpenGuide}
+                className="w-4 h-4 rounded-full border border-blue-500/60 bg-blue-950/40 hover:bg-blue-900/60 text-blue-300 flex items-center justify-center text-[10px] font-mono font-bold transition-colors ml-1"
+                title="Inspect Raft Construction HUD Details"
+              >
+                i
+              </button>
+            )}
           </div>
           <h2 className="text-xl font-bold text-slate-100 font-serif tracking-tight mt-0.5">
             The Escape Vessel

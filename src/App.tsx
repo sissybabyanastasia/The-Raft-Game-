@@ -57,7 +57,13 @@ export default function App() {
   const [isDossierOpen, setIsDossierOpen] = useState<boolean>(false);
   const [isConstitutionOpen, setIsConstitutionOpen] = useState<boolean>(false);
   const [isTutorialOpen, setIsTutorialOpen] = useState<boolean>(false);
+  const [tutorialBoxId, setTutorialBoxId] = useState<string | undefined>(undefined);
   const [isLeaveModalOpen, setIsLeaveModalOpen] = useState<boolean>(false);
+
+  const handleOpenTutorialWithBox = (boxId?: string) => {
+    setTutorialBoxId(boxId);
+    setIsTutorialOpen(true);
+  };
   const [selectedScavengeCard, setSelectedScavengeCard] = useState<SchemeCardId | null>(null);
   const [selectedScavengeCardIndex, setSelectedScavengeCardIndex] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -1228,10 +1234,16 @@ export default function App() {
 
         {currentGameId && game && (
           <div className="flex items-center gap-3">
+            {/* Reading Required Advisory Pill */}
+            <div className="hidden xl:flex items-center gap-2 px-3 py-1 rounded-full bg-amber-950/40 border border-amber-500/40 text-[11px] font-serif text-amber-200">
+              <span className="w-4 h-4 rounded-full border border-amber-400 text-amber-300 flex items-center justify-center font-bold text-[9px] font-mono">!</span>
+              <span>“This game requires reading to play. Please be advised.”</span>
+            </div>
+
             {/* Survival Walkthrough Guide Button */}
             <button
               id="open-guide-btn"
-              onClick={() => setIsTutorialOpen(true)}
+              onClick={() => handleOpenTutorialWithBox()}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-[#1c1d1a] hover:bg-[#2c2e28] border border-[#3e4235] text-amber-400 hover:text-amber-300 transition-colors shadow-sm"
               title="Open Survival Walkthrough Guide"
             >
@@ -1352,7 +1364,17 @@ export default function App() {
               <div className="p-3.5 rounded-lg bg-[#0e1626] border border-[#1e2c40] font-mono flex flex-col justify-between">
                 <div className="flex items-center justify-between text-[10px] uppercase text-slate-500 mb-1">
                   <span>Identity</span>
-                  <span className="text-slate-400">Public Record</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-slate-400">Public Record</span>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenTutorialWithBox('stat-reputation')}
+                      className="w-3.5 h-3.5 rounded-full border border-emerald-500/60 bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 flex items-center justify-center text-[9px] font-bold font-mono transition-colors"
+                      title="Inspect Identity & Reputation HUD Details"
+                    >
+                      i
+                    </button>
+                  </div>
                 </div>
                 <div className="font-serif font-bold text-slate-100 text-sm sm:text-base truncate">
                   {myPlayer.displayName}
@@ -1380,7 +1402,17 @@ export default function App() {
                     <BatteryCharging className="w-3 h-3 text-amber-500" />
                     Survival Energy
                   </span>
-                  <span className="text-amber-600 font-bold">Stash / Schemes</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-amber-600 font-bold">Stash / Schemes</span>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenTutorialWithBox('stat-energy')}
+                      className="w-3.5 h-3.5 rounded-full border border-amber-500/60 bg-amber-950/40 hover:bg-amber-900/60 text-amber-300 flex items-center justify-center text-[9px] font-bold font-mono transition-colors"
+                      title="Inspect Survival Energy & Stash HUD Details"
+                    >
+                      i
+                    </button>
+                  </div>
                 </div>
                 <div className="flex items-baseline justify-between">
                   <div className="font-bold text-amber-400 text-base sm:text-lg">
@@ -1404,6 +1436,7 @@ export default function App() {
                 onOpenDossier={() => setIsDossierOpen(true)}
                 onTriggerActiveAbility={handleExecuteRoleAction}
                 otherPlayers={otherPlayers}
+                onOpenGuide={() => handleOpenTutorialWithBox('stat-role')}
               />
             </div>
 
@@ -1412,6 +1445,7 @@ export default function App() {
               currentStage={game.raftStage}
               progress={game.raftProgress}
               vagueStatus={currentLedgerData?.stageProgressStatus || game.gmNarration}
+              onOpenGuide={() => handleOpenTutorialWithBox('raft-card')}
             />
 
             {/* Phase Switcher */}
@@ -1518,7 +1552,14 @@ export default function App() {
       <BuyMeACoffeeButton />
 
       {/* Shared Survival Walkthrough Modal */}
-      <TutorialModal isOpen={isTutorialOpen} onClose={() => setIsTutorialOpen(false)} />
+      <TutorialModal
+        isOpen={isTutorialOpen}
+        onClose={() => {
+          setIsTutorialOpen(false);
+          setTutorialBoxId(undefined);
+        }}
+        initialBoxId={tutorialBoxId}
+      />
     </div>
   );
 }

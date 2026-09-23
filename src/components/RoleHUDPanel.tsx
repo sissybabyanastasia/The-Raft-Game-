@@ -8,6 +8,7 @@ interface RoleHUDPanelProps {
   onOpenDossier: () => void;
   onTriggerActiveAbility?: (actionType: string, payload?: any) => void;
   otherPlayers: PlayerData[];
+  onOpenGuide?: () => void;
 }
 
 export const RoleHUDPanel: React.FC<RoleHUDPanelProps> = ({
@@ -15,6 +16,7 @@ export const RoleHUDPanel: React.FC<RoleHUDPanelProps> = ({
   onOpenDossier,
   onTriggerActiveAbility,
   otherPlayers,
+  onOpenGuide,
 }) => {
   if (!profile) return null;
 
@@ -31,6 +33,16 @@ export const RoleHUDPanel: React.FC<RoleHUDPanelProps> = ({
           <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-amber-500 font-bold">
             <Shield className="w-3.5 h-3.5" />
             <span>Private Archetype</span>
+            {onOpenGuide && (
+              <button
+                type="button"
+                onClick={onOpenGuide}
+                className="w-3.5 h-3.5 rounded-full border border-purple-500/60 bg-purple-950/40 hover:bg-purple-900/60 text-purple-300 flex items-center justify-center text-[9px] font-mono font-bold transition-colors ml-0.5"
+                title="Inspect Archetypes & Roles HUD Details"
+              >
+                i
+              </button>
+            )}
           </div>
 
           <button

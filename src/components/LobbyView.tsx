@@ -95,6 +95,31 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
             </div>
           </div>
 
+          {/* Reading Required Advisory Banner */}
+          <div className="my-4 p-3 rounded-lg bg-amber-950/40 border border-amber-500/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-sm">
+            <div className="flex items-center gap-2.5 text-amber-200">
+              <span className="w-5 h-5 rounded-full border border-amber-500/60 bg-amber-900/40 text-amber-300 flex items-center justify-center font-bold text-[10px] font-mono shrink-0">
+                !
+              </span>
+              <div>
+                <span className="text-xs font-serif font-bold text-amber-100 tracking-wide block sm:inline mr-2">
+                  “This game requires reading to play. Please be advised.”
+                </span>
+                <span className="text-[11px] text-amber-300/80 font-sans">
+                  Review the HUD breakdown and survival manual before commencing.
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsTutorialOpen(true)}
+              className="text-xs font-mono text-amber-400 hover:text-amber-300 underline underline-offset-2 shrink-0 self-start sm:self-auto font-bold flex items-center gap-1"
+            >
+              <span>📖 Open Guide</span>
+              <span>→</span>
+            </button>
+          </div>
+
           {/* Mode Selector */}
           <div className="my-5 p-4 rounded bg-[#0b121e] border border-[#1d2a3e]">
             <div className="flex items-center justify-between mb-2">
@@ -350,6 +375,10 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           <p className="text-xs sm:text-sm font-mono text-slate-400 mt-2 max-w-md mx-auto leading-relaxed">
             Castaways cooperating to build an escape craft while hoarding resources and lying upon the public ledger.
           </p>
+          <div className="mt-3 px-3 py-1.5 rounded-full bg-amber-950/40 border border-amber-500/40 inline-flex items-center gap-2 text-xs font-serif text-amber-200">
+            <span className="w-4 h-4 rounded-full border border-amber-400 text-amber-300 flex items-center justify-center font-bold text-[9px] font-mono">!</span>
+            <span>“This game requires reading to play. Please be advised.”</span>
+          </div>
           <div className="mt-4">
             <button
               id="tutorial-walkthrough-btn"
