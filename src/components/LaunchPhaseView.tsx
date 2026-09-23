@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Anchor,
   Users,
@@ -13,8 +13,10 @@ import {
   CheckCircle2,
   Lock,
   ArrowRight,
+  Layers,
 } from 'lucide-react';
 import type { GameData, PlayerData, PrivatePlayerProfile, RaftSeat } from '../types.js';
+import { SCHEME_CARDS } from '../lib/cards.js';
 import { ConfirmSkipModal } from './ConfirmSkipModal.js';
 
 interface LaunchPhaseViewProps {
@@ -60,8 +62,8 @@ export const LaunchPhaseView: React.FC<LaunchPhaseViewProps> = ({
   const isCurrentSeated = (launchData.seats || []).some(s => s.playerId === currentUserId);
   const isCurrentDrowned = (launchData.drownedPlayerIds || []).includes(currentUserId) || currentPlayer?.isDrowned;
 
-  // Local interactive states
-  const [selectedVoteTarget, setSelectedVoteTarget] = useState<string>('');
+  // Local interactive states - default to self if unseated!
+  const [selectedVoteTarget, setSelectedVoteTarget] = useState<string>(!isCurrentSeated && !isCurrentDrowned ? currentUserId : '');
   const [buyoutBid, setBuyoutBid] = useState<number>(launchData.buyoutPrice || 5);
   const [mutinyTargetSeat, setMutinyTargetSeat] = useState<number>(1);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -70,17 +72,21 @@ export const LaunchPhaseView: React.FC<LaunchPhaseViewProps> = ({
   const [forceResolveEnabled, setForceResolveEnabled] = useState<boolean>(false);
   const [isConfirmSkipOpen, setIsConfirmSkipOpen] = useState<boolean>(false);
 
+  useEffect(() => {
+    if (!selectedVoteTarget && !isCurrentSeated && !isCurrentDrowned && currentUserId) {
+      setSelectedVoteTarget(currentUserId);
+    }
+  }, [currentUserId, isCurrentSeated, isCurrentDrowned, selectedVoteTarget]);
+
   const hasMutinyCard = userProfile?.hand?.includes('mutiny');
   const userStash = userProfile?.stash || 0;
   const userRep = currentPlayer?.reputation || 0;
 
-  // Voter Weight calculation
+  // Voter Weight calculation: scales smoothly with high reputation!
   let voterWeight = 1;
   if (userRep < 0) voterWeight = 0;
   else if (userRep === 0) voterWeight = 1;
-  else if (userRep <= 3) voterWeight = 2;
-  else if (userRep <= 6) voterWeight = 3;
-  else voterWeight = 4;
+  else voterWeight = Math.min(15, 1 + Math.ceil(userRep / 3));
 
   const seatedIds = new Set((launchData.seats || []).map(s => s.playerId));
   const unseatedPlayers = players.filter(p => !seatedIds.has(p.id) && !p.isDrowned);
@@ -269,7 +275,95 @@ export const LaunchPhaseView: React.FC<LaunchPhaseViewProps> = ({
           </div>
         </div>
 
-        {/* Mutiny Button if player holds card */}
+        {/* Your Secret Hand & Survival Reserves */}
+        <div className="mb-6 p-4 rounded-lg bg-[#0a101b] border border-[#23334d]">
+          <div className="flex items-center justify-between mb-3 border-b border-[#1b283d] pb-2">
+            <div className="flex items-center gap-2">
+              <Layers className="w-4 h-4 text-amber-400" />
+              <h4 className="text-xs font-mono uppercase tracking-wider text-slate-200 font-bold">
+                Your Secret Hand & Survival Reserves
+              </h4>
+            </div>
+            <div className="flex items-center gap-3 text-xs font-mono">
+              <div className="flex items-center gap-1.5 text-amber-400 font-bold">
+                <Coins className="w-3.5 h-3.5" />
+                <span>{userStash} Stash</span>
+              </div>
+              <span className="text-slate-600">|</span>
+              <span className="text-slate-400">Reputation: <strong className="text-slate-200">{userRep}</strong></span>
+            </div>
+          </div>
+
+          {(userProfile?.hand || []).length === 0 ? (
+            <p className="text-xs text-slate-500 font-mono italic">
+              You hold no scheme cards in hand. Survival relies on your reputation, stash, and endurance.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+              {(userProfile?.hand || []).map((cardId, idx) => {
+                const card = SCHEME_CARDS[cardId];
+                if (!card) return null;
+                const isMutiny = cardId === 'mutiny';
+                const canAffordMutiny = userStash >= 2;
+                const canUseMutiny = isMutiny && canAffordMutiny && (launchData.seats || []).length > 0 && launchData.state !== 'done';
+
+                return (
+                  <div
+                    key={`${cardId}-${idx}`}
+                    className={`p-3 rounded border text-xs font-mono flex flex-col justify-between ${
+                      isMutiny
+                        ? 'bg-red-950/30 border-red-800/80 ring-1 ring-red-700/50'
+                        : 'bg-[#101726] border-[#223249]'
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className={`font-bold font-serif ${isMutiny ? 'text-red-300' : 'text-slate-200'}`}>
+                          {card.name}
+                        </span>
+                        {card.costStash > 0 ? (
+                          <span className="text-[10px] text-amber-400">{card.costStash} Stash</span>
+                        ) : (
+                          <span className="text-[10px] text-slate-500">Free</span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-400 font-sans line-clamp-2 mb-2">
+                        {card.effect}
+                      </p>
+                    </div>
+                    {isMutiny ? (
+                      <div className="pt-2 border-t border-red-900/40 flex items-center justify-between mt-auto">
+                        <span className="text-[10px] text-red-300/80 font-bold">Launch Action</span>
+                        {canUseMutiny ? (
+                          <button
+                            type="button"
+                            onClick={() => setShowMutinyModal(true)}
+                            className="px-2 py-0.5 rounded bg-red-700 hover:bg-red-600 text-white text-[10px] font-bold"
+                          >
+                            Play Mutiny
+                          </button>
+                        ) : (
+                          <span className="text-[10px] text-slate-500">
+                            {(launchData.seats || []).length === 0 ? 'Wait for seats' : 'Need 2 Stash'}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="pt-2 border-t border-[#1a2538] flex items-center justify-between mt-auto">
+                        <span className="text-[10px] text-slate-500">Held in reserve</span>
+                        <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-slate-900 text-slate-400 border border-slate-700">
+                          {card.timing}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Mutiny Banner if player holds card and seats are available to challenge */}
         {hasMutinyCard && userStash >= 2 && launchData.seats?.length > 0 && launchData.state !== 'done' && (
           <div className="mb-6 p-3 rounded bg-red-950/30 border border-red-800/60 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -331,12 +425,16 @@ export const LaunchPhaseView: React.FC<LaunchPhaseViewProps> = ({
             <div className="pt-2 flex justify-end">
               <button
                 id="advance-to-provisioner-btn"
-                onClick={handleAdvance}
+                onClick={executeAdvance}
                 disabled={isSubmitting}
-                className="px-5 py-2.5 rounded font-bold text-xs uppercase tracking-wider bg-amber-600 hover:bg-amber-500 text-slate-950 flex items-center gap-2 font-mono transition-colors shadow-lg"
+                className="px-5 py-2.5 rounded font-bold text-xs uppercase tracking-wider bg-amber-600 hover:bg-amber-500 text-slate-950 flex items-center gap-2 font-mono transition-colors shadow-lg disabled:opacity-50"
               >
-                Proceed to Provisioner&apos;s Claim
-                <ChevronRight className="w-4 h-4" />
+                {isSubmitting ? 'Advancing...' : (
+                  <>
+                    Proceed to Provisioner&apos;s Claim
+                    <ChevronRight className="w-4 h-4" />
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -356,12 +454,16 @@ export const LaunchPhaseView: React.FC<LaunchPhaseViewProps> = ({
             <div className="pt-2 flex justify-end">
               <button
                 id="proceed-to-vote-btn"
-                onClick={handleAdvance}
+                onClick={executeAdvance}
                 disabled={isSubmitting}
-                className="px-5 py-2.5 rounded font-bold text-xs uppercase tracking-wider bg-amber-600 hover:bg-amber-500 text-slate-950 flex items-center gap-2 font-mono transition-colors shadow-lg"
+                className="px-5 py-2.5 rounded font-bold text-xs uppercase tracking-wider bg-amber-600 hover:bg-amber-500 text-slate-950 flex items-center gap-2 font-mono transition-colors shadow-lg disabled:opacity-50"
               >
-                Proceed to Democratic Vote
-                <ChevronRight className="w-4 h-4" />
+                {isSubmitting ? 'Advancing...' : (
+                  <>
+                    Proceed to Democratic Vote
+                    <ChevronRight className="w-4 h-4" />
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -395,18 +497,24 @@ export const LaunchPhaseView: React.FC<LaunchPhaseViewProps> = ({
             ) : (
               <div className="space-y-3">
                 <p className="text-xs text-slate-300 font-mono">
-                  Select one unseated castaway to vote into the next available berth (you may not vote for yourself):
+                  Cast your reputation-weighted ballot to claim a berth. You may vote for yourself or another unseated castaway:
                 </p>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {unseatedPlayers
-                    .filter(p => p.id !== currentUserId)
-                    .map(player => (
+                  {unseatedPlayers.map((player) => {
+                    const isYou = player.id === currentUserId;
+                    const isSelected = selectedVoteTarget === player.id;
+
+                    return (
                       <label
                         key={player.id}
                         className={`p-3 rounded border flex items-center justify-between cursor-pointer transition-colors ${
-                          selectedVoteTarget === player.id
-                            ? 'bg-amber-950/50 border-amber-500 text-amber-200 ring-1 ring-amber-500'
+                          isSelected
+                            ? isYou
+                              ? 'bg-emerald-950/60 border-emerald-500 text-emerald-200 ring-2 ring-emerald-500/60 shadow-lg shadow-emerald-950/40'
+                              : 'bg-amber-950/50 border-amber-500 text-amber-200 ring-1 ring-amber-500'
+                            : isYou
+                            ? 'bg-emerald-950/20 border-emerald-800/60 text-slate-200 hover:border-emerald-500'
                             : 'bg-[#0a111e] border-[#1e2d42] text-slate-300 hover:border-slate-500'
                         }`}
                       >
@@ -415,17 +523,32 @@ export const LaunchPhaseView: React.FC<LaunchPhaseViewProps> = ({
                             type="radio"
                             name="voteTarget"
                             value={player.id}
-                            checked={selectedVoteTarget === player.id}
+                            checked={isSelected}
                             onChange={() => setSelectedVoteTarget(player.id)}
                             className="text-amber-500 focus:ring-0"
                           />
-                          <span className="font-serif font-bold text-sm">{player.displayName}</span>
+                          <div className="flex flex-col">
+                            <span className="font-serif font-bold text-sm flex items-center gap-1.5">
+                              {player.displayName}
+                              {isYou && (
+                                <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-mono font-bold uppercase tracking-wider border border-emerald-500/40">
+                                  You (Vote For Yourself)
+                                </span>
+                              )}
+                            </span>
+                            {isYou && (
+                              <span className="text-[10px] font-mono text-emerald-400/90 mt-0.5">
+                                Cast your full {voterWeight}x weighted reputation to claim this berth!
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        <span className="font-mono text-xs text-slate-400">
+                        <span className="font-mono text-xs text-slate-400 shrink-0">
                           {player.reputation > 0 ? `+${player.reputation}` : player.reputation} Rep
                         </span>
                       </label>
-                    ))}
+                    );
+                  })}
                 </div>
 
                 <div className="pt-2 flex justify-end">
@@ -435,7 +558,9 @@ export const LaunchPhaseView: React.FC<LaunchPhaseViewProps> = ({
                     disabled={!selectedVoteTarget || isSubmitting}
                     className="px-5 py-2.5 rounded font-bold text-xs uppercase tracking-wider bg-amber-600 hover:bg-amber-500 text-slate-950 disabled:opacity-50 font-mono transition-colors shadow-lg"
                   >
-                    Submit Ballot ({voterWeight}x Weight)
+                    {selectedVoteTarget === currentUserId
+                      ? `Vote For Yourself (${voterWeight}x Weight)`
+                      : `Submit Ballot (${voterWeight}x Weight)`}
                   </button>
                 </div>
               </div>

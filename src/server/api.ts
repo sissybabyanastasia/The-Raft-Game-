@@ -207,11 +207,11 @@ apiRouter.post('/game/play-resolution-card', async (req: Request, res: Response)
 // Discard card from hand
 apiRouter.post('/game/discard-card', async (req: Request, res: Response) => {
   try {
-    const { gameId, playerId, cardId } = req.body;
+    const { gameId, playerId, cardId, cardIndex } = req.body;
     if (!gameId || !playerId || !cardId) {
       return res.status(400).json({ error: 'gameId, playerId, and cardId are required' });
     }
-    const result = await discardCard(gameId, playerId, cardId);
+    const result = await discardCard(gameId, playerId, cardId, typeof cardIndex === 'number' ? cardIndex : undefined);
     res.json(result);
   } catch (error: any) {
     console.error('Discard card error:', error);

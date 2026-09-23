@@ -68,7 +68,7 @@ import {
   generateIslandGuiltySentence,
 } from './gemini.js';
 import { ARCHETYPES, getRosterForPlayerCount } from '../lib/archetypes.js';
-import { SCHEME_CARDS, createShuffledDeck, canPlaySaint } from '../lib/cards.js';
+import { SCHEME_CARDS, createShuffledDeck, canPlaySaint, STAGE_CARDS } from '../lib/cards.js';
 import { CONSTITUTION_CLAUSES } from '../lib/constitution.js';
 import type {
   RaftStage,
@@ -102,6 +102,7 @@ import type {
   BlameVote,
   PlayerScorecard,
 } from '../types.js';
+import { getRaftStageNumber } from '../types.js';
 
 export const STAGE_REQUIREMENTS: Record<RaftStage, number> = {
   frame: 12,
@@ -141,6 +142,9 @@ async function drawCardsFromDeck(
   count: number,
   roundNumber: number = 1
 ): Promise<{ drawn: SchemeCardId[]; reshuffled: boolean }> {
+  const stage = Math.min(4, Math.max(1, roundNumber));
+  const stagePool = STAGE_CARDS[stage] || STAGE_CARDS[1];
+
   const deckRef = doc(db, `games/${gameId}/deck`, 'state');
   const deckSnap = await getDoc(deckRef);
 
@@ -152,7 +156,7 @@ async function drawCardsFromDeck(
     remaining = [...(data.remaining || [])];
     discarded = [...(data.discarded || [])];
   } else {
-    remaining = createShuffledDeck(3);
+    remaining = createShuffledDeck(stage, 3);
     discarded = [];
   }
 
@@ -168,26 +172,15 @@ async function drawCardsFromDeck(
         reshuffled = true;
       } else {
         // Generate new deck if all depleted
-        remaining = createShuffledDeck(2);
+        remaining = createShuffledDeck(stage, 2);
         reshuffled = true;
       }
     }
     if (remaining.length > 0) {
       let card = remaining.pop()!;
-      // Prevent drawing 'mutiny' before Round 4 (since raft seat assignments haven't begun yet)
-      if (card === 'mutiny' && roundNumber < 4) {
-        const allowedPool: SchemeCardId[] = [
-          'forged_ledger',
-          'bribe',
-          'whisper_campaign',
-          'sabotage',
-          'smokescreen',
-          'saint',
-          'ghost_write',
-          'propaganda',
-          'black_market',
-        ];
-        card = allowedPool[Math.floor(Math.random() * allowedPool.length)];
+      // Enforce stage availability: if an out-of-stage card was in deck, substitute with an allowed stage card
+      if (!stagePool.includes(card)) {
+        card = stagePool[Math.floor(Math.random() * stagePool.length)];
       }
       drawn.push(card);
     }
@@ -430,8 +423,8 @@ export async function startGame(gameId: string, hostId: string) {
 
   const playersList = playersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-  // Initialize shared deck of Scheme cards (3 copies of all 8 cards)
-  const initialDeck = createShuffledDeck(3);
+  // Initialize shared deck of Scheme cards (3 copies of Stage 1 cards)
+  const initialDeck = createShuffledDeck(1, 3);
   const deckRef = doc(db, `games/${gameId}/deck`, 'state');
   await setDoc(deckRef, {
     remaining: initialDeck,
@@ -493,8 +486,8 @@ export async function startGame(gameId: string, hostId: string) {
       }
     }
 
-    // Draw 2 initial cards from deck
-    const { drawn } = await drawCardsFromDeck(gameId, 2);
+    // Draw 2 initial cards from deck (Stage 1 pool)
+    const { drawn } = await drawCardsFromDeck(gameId, 2, 1);
 
     const privateRef = doc(db, `games/${gameId}/players/${p.id}/private`, 'profile');
     await setDoc(privateRef, {
@@ -607,7 +600,9 @@ export async function submitAllocation(
     roleAction?: string | null;
     rolePayload?: any;
     playedCardId?: SchemeCardId | null;
+    playedCardIndex?: number | null;
     cardTargetId?: string | null;
+    cardDeducted?: boolean;
   },
   claimedLabor: number
 ) {
@@ -661,26 +656,41 @@ export async function submitAllocation(
       throw new Error(`You do not hold ${cardDef.name} in your hand.`);
     }
 
+    const currentStage = getRaftStageNumber(gameData.raftStage, currentRound);
+    if (cardDef.minStage && currentStage < cardDef.minStage) {
+      throw new Error(`${cardDef.name} cannot be played until Stage ${cardDef.minStage}.`);
+    }
+
     // Balance rule for Saint: True labor >= Claimed labor
     if (playedCardId === 'saint' && !canPlaySaint({ trueLabor: actualLabor, claimedLabor })) {
       throw new Error('Saint card may only be played if your true Labor is greater than or equal to your claimed Labor.');
     }
 
-    // Remove card from player hand and add to discard
+    // Immediately remove exactly ONE card from hand upon sealing submission.
+    // If the client specified a specific card index in hand, remove that exact instance.
     const newHand = [...profile.hand];
-    const cardIndex = newHand.indexOf(playedCardId);
+    let cardIndex = -1;
+    if (
+      typeof allocation.playedCardIndex === 'number' &&
+      allocation.playedCardIndex >= 0 &&
+      allocation.playedCardIndex < newHand.length &&
+      newHand[allocation.playedCardIndex] === playedCardId
+    ) {
+      cardIndex = allocation.playedCardIndex;
+    } else {
+      cardIndex = newHand.indexOf(playedCardId);
+    }
     if (cardIndex >= 0) newHand.splice(cardIndex, 1);
 
     await updateDoc(privRef, {
       hand: newHand,
       cardsPlayed: (profile.cardsPlayed || 0) + 1,
     });
-    await updateDoc(playerRef, {
+
+    const publicPlayerRef = doc(db, `games/${gameId}/players`, playerId);
+    await updateDoc(publicPlayerRef, {
       handCount: newHand.length,
     });
-    await addCardsToDiscard(gameId, [playedCardId]);
-
-    await addPrivateLog(gameId, playerId, `You played ${cardDef.name} during Scavenge.`, currentRound);
   }
 
   const roundRef = doc(db, `games/${gameId}/rounds`, currentRound.toString());
@@ -694,47 +704,37 @@ export async function submitAllocation(
     new Set([...(roundData.submittedPlayerIds || []), playerId])
   );
 
-  const cardsPlayed: CardPlayRecord[] = roundData.cardsPlayed ? [...roundData.cardsPlayed] : [];
-  if (playedCardId) {
-    const playRecord: CardPlayRecord = {
-      playerId,
-      playerName: playerData.displayName,
-      cardId: playedCardId,
-      timing: 'scavenge',
-      resolved: false,
-      timestamp: Date.now(),
-    };
-    if (cardTargetId) {
-      playRecord.targetId = cardTargetId;
-    }
-    if (!cardsPlayed.some((c) => c.playerId === playerId && c.cardId === playedCardId)) {
-      cardsPlayed.push(playRecord);
-    }
-  }
+  let cardsPlayed: CardPlayRecord[] = roundData.cardsPlayed || [];
 
   // Fetch all players for game context and bot checks
   const playersRef = collection(db, `games/${gameId}/players`);
   const allPlayersSnap = await getDocs(playersRef);
   const allPlayers: any[] = allPlayersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-  // Preserve any scavenge cards played across all submissions in this round
-  for (const [subPlayerId, subRaw] of Object.entries(submissions)) {
-    const sub = subRaw as any;
-    if (
-      sub &&
-      sub.playedCardId &&
-      !cardsPlayed.some((c) => c.playerId === subPlayerId && c.cardId === sub.playedCardId)
-    ) {
-      cardsPlayed.push({
-        playerId: subPlayerId,
-        playerName: (allPlayers.find((p) => p.id === subPlayerId)?.displayName) || 'Castaway',
-        cardId: sub.playedCardId,
-        targetId: sub.cardTargetId || undefined,
-        timing: 'scavenge',
-        resolved: false,
-        timestamp: sub.timestamp || Date.now(),
-      });
-    }
+  if (playedCardId) {
+    const cardDef = SCHEME_CARDS[playedCardId];
+    // Filter out previous play record for this player to prevent duplicates
+    cardsPlayed = cardsPlayed.filter((c) => c.playerId !== playerId);
+    cardsPlayed.push({
+      playerId,
+      playerName: (allPlayers.find((p) => p.id === playerId) as any)?.displayName || 'Castaway',
+      cardId: playedCardId,
+      targetId: cardTargetId || undefined,
+      timing: 'scavenge',
+      resolved: false,
+      timestamp: Date.now(),
+    });
+
+    await addCardsToDiscard(gameId, [playedCardId]).catch((err) =>
+      console.error('Discard fail in submitAllocation:', err)
+    );
+
+    await addPrivateLog(
+      gameId,
+      playerId,
+      `You committed ${cardDef?.name || playedCardId} with your Scavenge allocation.`,
+      currentRound
+    ).catch((err) => console.error('Private log fail in submitAllocation:', err));
   }
 
   submissions[playerId] = {
@@ -748,7 +748,9 @@ export async function submitAllocation(
     roleAction: allocation.roleAction || null,
     rolePayload: allocation.rolePayload || null,
     playedCardId: playedCardId || null,
+    playedCardIndex: typeof allocation.playedCardIndex === 'number' ? allocation.playedCardIndex : null,
     cardTargetId: cardTargetId || null,
+    cardDeducted: Boolean(playedCardId),
     timestamp: Date.now(),
   };
 
@@ -1057,6 +1059,11 @@ export async function playResolutionCard(
     throw new Error(`${cardDef.name} can only be played during Scavenge.`);
   }
 
+  const currentStage = getRaftStageNumber(gameData.raftStage, currentRound);
+  if (cardDef.minStage && currentStage < cardDef.minStage) {
+    throw new Error(`${cardDef.name} cannot be played until Stage ${cardDef.minStage}.`);
+  }
+
   const privRef = doc(db, `games/${gameId}/players/${playerId}/private`, 'profile');
   const privSnap = await getDoc(privRef);
   if (!privSnap.exists()) throw new Error('Private profile not found.');
@@ -1122,7 +1129,12 @@ export async function playResolutionCard(
 }
 
 // Discard card from hand (e.g. hand limit management)
-export async function discardCard(gameId: string, playerId: string, cardId: SchemeCardId) {
+export async function discardCard(
+  gameId: string,
+  playerId: string,
+  cardId: SchemeCardId,
+  cardIndex?: number
+) {
   const privRef = doc(db, `games/${gameId}/players/${playerId}/private`, 'profile');
   const privSnap = await getDoc(privRef);
   if (!privSnap.exists()) throw new Error('Player profile not found.');
@@ -1133,7 +1145,17 @@ export async function discardCard(gameId: string, playerId: string, cardId: Sche
   }
 
   const newHand = [...profile.hand];
-  const idx = newHand.indexOf(cardId);
+  let idx = -1;
+  if (
+    typeof cardIndex === 'number' &&
+    cardIndex >= 0 &&
+    cardIndex < newHand.length &&
+    newHand[cardIndex] === cardId
+  ) {
+    idx = cardIndex;
+  } else {
+    idx = newHand.indexOf(cardId);
+  }
   if (idx >= 0) newHand.splice(idx, 1);
 
   await updateDoc(privRef, { hand: newHand });
@@ -1214,6 +1236,54 @@ export async function resolveRound(
         cardsPlayed: 0,
         smokescreenActive: false,
       };
+    }
+  }
+
+  // Pre-process and validate Scavenge card plays from final sealed submissions
+  for (const player of allPlayers) {
+    const sub = submissions[player.id];
+    if (sub && sub.playedCardId) {
+      const cardId = sub.playedCardId;
+      // Ensure they didn't already have a play record in cardsPlayed
+      const alreadyInCardsPlayed = cardsPlayed.some((play) => play.playerId === player.id);
+      
+      if (!alreadyInCardsPlayed) {
+        cardsPlayed.push({
+          playerId: player.id,
+          playerName: player.displayName || 'Castaway',
+          cardId: cardId,
+          targetId: sub.cardTargetId || undefined,
+          timing: 'scavenge',
+          resolved: false,
+          timestamp: sub.timestamp || Date.now(),
+        });
+        
+        await addCardsToDiscard(gameId, [cardId]).catch((err) =>
+          console.error('Discard fail in resolveRound:', err)
+        );
+        
+        await addPrivateLog(
+          gameId,
+          player.id,
+          `You played ${SCHEME_CARDS[cardId as SchemeCardId]?.name || cardId} during Scavenge.`,
+          roundNumber
+        ).catch((err) => console.error('Private log fail in resolveRound:', err));
+      }
+
+      // CRITICAL BUG FIX: Only deduct from hand if it was NOT already deducted during submitAllocation!
+      // When a player submits in Scavenge, submitAllocation immediately deducts exactly ONE card from their hand
+      // and flags sub.cardDeducted = true. Deducting again here would expend duplicate cards held in hand (e.g. 2 Saints)!
+      if (!sub.cardDeducted) {
+        const profile = privateProfiles[player.id];
+        const isBot = !!player.isBot;
+        if (!isBot && profile && profile.hand) {
+          const index = profile.hand.indexOf(cardId);
+          if (index >= 0) {
+            profile.hand.splice(index, 1);
+          }
+          profile.cardsPlayed = (profile.cardsPlayed || 0) + 1;
+        }
+      }
     }
   }
 
@@ -2154,25 +2224,29 @@ export async function advanceLaunchStep(gameId: string, hostId?: string) {
 
     for (const voter of unseatedPlayers) {
       const vote = pendingVotes[voter.id];
-      if (vote && vote.targetId && vote.targetId !== voter.id && !seatedIds.has(vote.targetId)) {
+      // A voter can vote for themselves or another unseated candidate; uncast ballots default to voting for oneself
+      let targetId = vote?.targetId || voter.id;
+      if (seatedIds.has(targetId)) {
+        targetId = voter.id;
+      }
+
+      if (!seatedIds.has(targetId)) {
         const voterRep = voter.reputation || 0;
         let weight = 1;
         if (voterRep < 0) weight = 0;
         else if (voterRep === 0) weight = 1;
-        else if (voterRep <= 3) weight = 2;
-        else if (voterRep <= 6) weight = 3;
-        else weight = 4;
+        else weight = Math.min(15, 1 + Math.ceil(voterRep / 3));
 
-        if (voteTallies[vote.targetId]) {
-          voteTallies[vote.targetId].totalWeight += weight;
-          voteTallies[vote.targetId].voterNames.push(voter.displayName);
+        if (voteTallies[targetId]) {
+          voteTallies[targetId].totalWeight += weight;
+          voteTallies[targetId].voterNames.push(voter.displayName);
         }
 
-        const targetPlayer = allPlayers.find(pl => pl.id === vote.targetId);
+        const targetPlayer = allPlayers.find(pl => pl.id === targetId);
         recordedVotes.push({
           voterId: voter.id,
           voterName: voter.displayName,
-          targetId: vote.targetId,
+          targetId: targetId,
           targetName: targetPlayer?.displayName || 'Unknown',
           voterReputation: voterRep,
           weight,
@@ -2543,10 +2617,6 @@ export async function submitLaunchVote(gameId: string, voterId: string, targetId
     throw new Error('Voting is not currently active.');
   }
 
-  if (voterId === targetId) {
-    throw new Error('You cannot vote for yourself.');
-  }
-
   const launchData: LaunchData = gameData.launchData;
   const currentSeats = launchData.seats || [];
   if (currentSeats.some(s => s.playerId === targetId)) {
@@ -2564,9 +2634,7 @@ export async function submitLaunchVote(gameId: string, voterId: string, targetId
   let weight = 1;
   if (voterRep < 0) weight = 0;
   else if (voterRep === 0) weight = 1;
-  else if (voterRep <= 3) weight = 2;
-  else if (voterRep <= 6) weight = 3;
-  else weight = 4;
+  else weight = Math.min(15, 1 + Math.ceil(voterRep / 3));
 
   const pendingVotes = launchData.pendingVotes || {};
   pendingVotes[voterId] = {

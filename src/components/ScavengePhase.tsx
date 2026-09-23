@@ -18,8 +18,16 @@ import {
   FileSpreadsheet,
   Wind,
   ShieldCheck,
+  Info,
+  HelpCircle,
+  ChevronDown,
+  ChevronUp,
+  FileText,
+  CheckCircle2,
+  ArrowRight,
 } from 'lucide-react';
-import type { PlayerData, AllocationPayload, PrivatePlayerProfile, SchemeCardId } from '../types.js';
+import type { PlayerData, AllocationPayload, PrivatePlayerProfile, SchemeCardId, RaftStage } from '../types.js';
+import { getRaftStageNumber } from '../types.js';
 import { ARCHETYPES } from '../lib/archetypes.js';
 import { SCHEME_CARDS, canPlaySaint } from '../lib/cards.js';
 
@@ -28,11 +36,13 @@ interface ScavengePhaseProps {
   profile: PrivatePlayerProfile | null;
   otherPlayers: PlayerData[];
   roundNumber: number;
+  raftStage?: RaftStage;
   totalCastaways: number;
   submittedCount: number;
   hasSubmitted: boolean;
   selectedScavengeCard: SchemeCardId | null;
-  onSelectScavengeCard: (cardId: SchemeCardId | null) => void;
+  selectedScavengeCardIndex?: number | null;
+  onSelectScavengeCard: (cardId: SchemeCardId | null, cardIndex?: number | null) => void;
   onSubmitAllocation: (allocation: AllocationPayload) => Promise<void>;
   onExecuteRoleAction?: (actionType: string, payload?: any) => Promise<any>;
   isLoading: boolean;
@@ -43,10 +53,12 @@ export const ScavengePhase: React.FC<ScavengePhaseProps> = ({
   profile,
   otherPlayers,
   roundNumber,
+  raftStage,
   totalCastaways,
   submittedCount,
   hasSubmitted,
   selectedScavengeCard,
+  selectedScavengeCardIndex,
   onSelectScavengeCard,
   onSubmitAllocation,
   onExecuteRoleAction,
@@ -63,6 +75,7 @@ export const ScavengePhase: React.FC<ScavengePhaseProps> = ({
   const [cardTargetId, setCardTargetId] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(null);
+  const [showLedgerGuide, setShowLedgerGuide] = useState<boolean>(false);
 
   // Active ability modal states
   const [selectedEndorseTarget, setSelectedEndorseTarget] = useState<string>('');
@@ -123,6 +136,11 @@ export const ScavengePhase: React.FC<ScavengePhaseProps> = ({
     }
 
     if (selectedScavengeCard) {
+      const currentStage = getRaftStageNumber(raftStage, roundNumber);
+      if (activeCardDef?.minStage && currentStage < activeCardDef.minStage) {
+        setErrorMsg(`${activeCardDef.name} cannot be played until Stage ${activeCardDef.minStage}.`);
+        return;
+      }
       if (activeCardDef?.requiresTarget && !cardTargetId) {
         setErrorMsg(`Scheme card "${activeCardDef.name}" requires selecting a target castaway.`);
         return;
@@ -145,6 +163,7 @@ export const ScavengePhase: React.FC<ScavengePhaseProps> = ({
         claimedLabor,
         auditTargetId: auditTargetId || null,
         playedCardId: selectedScavengeCard || null,
+        playedCardIndex: selectedScavengeCardIndex ?? null,
         cardTargetId: cardTargetId || null,
       });
     } catch (err: any) {
@@ -456,6 +475,77 @@ export const ScavengePhase: React.FC<ScavengePhaseProps> = ({
         </div>
       )}
 
+      {/* Energy Allocation & Ledger Translation Explainer */}
+      <div className="mt-5 rounded-lg border border-[#23354f] bg-[#0c1322] overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setShowLedgerGuide(!showLedgerGuide)}
+          className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-[#121c2e] transition-colors"
+        >
+          <div className="flex items-center gap-2.5">
+            <div className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-xs shrink-0">
+              <Info className="w-3.5 h-3.5" />
+            </div>
+            <div>
+              <span className="text-xs font-mono font-bold text-amber-300 uppercase tracking-wide">
+                How Energy Allocation Translates to the Morning Ledger
+              </span>
+              <p className="text-[11px] text-slate-400">
+                Understanding Secret Energy vs. Public Claims & The Raft Reality
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 text-xs font-mono text-slate-400 shrink-0">
+            <span>{showLedgerGuide ? 'Hide Guide' : 'Show Explanation'}</span>
+            {showLedgerGuide ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </div>
+        </button>
+
+        {showLedgerGuide && (
+          <div className="px-5 py-4 border-t border-[#1d2c42] bg-[#080d17] space-y-4 text-xs font-sans text-slate-300">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="p-3 rounded bg-[#0f1726] border border-[#22334a] space-y-1.5">
+                <div className="flex items-center gap-2 text-slate-100 font-bold font-serif text-sm">
+                  <EyeOff className="w-3.5 h-3.5 text-slate-400" />
+                  <span>1. Secret Energy Allocation (Night)</span>
+                </div>
+                <p className="text-slate-400 text-[11px] leading-relaxed">
+                  Your energy points are spent in total secrecy. No one else can see your breakdown:
+                </p>
+                <ul className="space-y-1 text-[11px] text-slate-300 pl-1">
+                  <li><strong className="text-amber-300">🔨 Labor (True):</strong> The only energy that genuinely builds the raft. (Becomes 0 if auditing someone).</li>
+                  <li><strong className="text-amber-300">🔒 Stash:</strong> Hidden food/supplies hoarded for yourself. Never shown on the Ledger.</li>
+                  <li><strong className="text-amber-300">✨ Scheme:</strong> Draw secret cards (2 energy = 1 card) or launch a formal audit inquest.</li>
+                  <li><strong className="text-amber-300">🌙 Rest:</strong> Sleeping to wake up with +1 bonus Energy for the next day.</li>
+                </ul>
+              </div>
+
+              <div className="p-3 rounded bg-[#0f1726] border border-[#22334a] space-y-1.5">
+                <div className="flex items-center gap-2 text-slate-100 font-bold font-serif text-sm">
+                  <FileText className="w-3.5 h-3.5 text-amber-400" />
+                  <span>2. Declared Labor on the Ledger (Morning)</span>
+                </div>
+                <p className="text-slate-400 text-[11px] leading-relaxed">
+                  The <strong className="text-amber-300">Declared Labor</strong> you write below is the ONLY thing published to the table on the public Ledger:
+                </p>
+                <ul className="space-y-1 text-[11px] text-slate-300 pl-1">
+                  <li><strong className="text-emerald-300">Truthful Claim:</strong> Claim = True Labor. You are safe from audits (+2 Rep if anyone falsely audits you!).</li>
+                  <li><strong className="text-amber-300">Exaggerated Claim:</strong> Claim &gt; True Labor. Creates a "Phantom Gap". You look heroic on paper, but risk -4 Rep if audited.</li>
+                  <li><strong className="text-rose-300">The Raft Reality:</strong> The Raft ONLY advances by TRUE labor. If everyone claims 5 but hoarded stash, the Ledger total looks huge, but the raft will stall and fail!</li>
+                </ul>
+              </div>
+            </div>
+
+            <div className="p-3 rounded bg-[#131d2e] border border-amber-900/40 text-[11px] text-amber-200/90 leading-relaxed flex items-start gap-2.5">
+              <span className="text-base">💡</span>
+              <div>
+                <strong className="font-bold text-amber-300">Audits & The Final Reckoning:</strong> Fellow castaways who allocate Scheme points can audit your claim. If they catch you lying, you lose 4 Reputation and they gain 3! Furthermore, at the end of the game, the true historical ledger is unmasked during The Reckoning trial to expose the biggest liars and embezzlers.
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
       <form onSubmit={handleSubmit} className="mt-6 space-y-6">
         {/* Secret Actions Grid */}
         <div>
@@ -704,6 +794,84 @@ export const ScavengePhase: React.FC<ScavengePhaseProps> = ({
           </div>
         </div>
 
+        {/* Dynamic Live Ledger Translation Breakdown */}
+        <div className="p-4 rounded-lg bg-[#080e19] border border-[#1f2f45] font-mono text-xs">
+          <div className="flex items-center justify-between pb-2 mb-2 border-b border-[#1c293d]">
+            <span className="text-[11px] uppercase tracking-wider text-amber-400 font-bold flex items-center gap-1.5">
+              <FileSpreadsheet className="w-3.5 h-3.5 text-amber-400" />
+              Live Ledger Translation Summary
+            </span>
+            <span className="text-[10px] text-slate-500">How your choices translate at morning tally</span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+            {/* Secret Reality */}
+            <div className="space-y-1.5 text-[11px] p-2.5 rounded bg-[#0b121f] border border-[#1a2638]">
+              <div className="text-slate-400 uppercase text-[10px] tracking-wider font-bold border-b border-[#182333] pb-1 flex items-center justify-between">
+                <span>1. Secret Physical Reality</span>
+                <span className="text-emerald-400 font-mono">True Output</span>
+              </div>
+              <div className="text-slate-300 flex justify-between">
+                <span>Raft Construction (True Labor):</span>
+                <span className="font-bold text-emerald-400">+{auditTargetId ? 0 : labor} timber</span>
+              </div>
+              <div className="text-slate-300 flex justify-between">
+                <span>Secret Personal Stash:</span>
+                <span className="font-bold text-amber-400">+{stash} provisions</span>
+              </div>
+              <div className="text-slate-300 flex justify-between">
+                <span>Schemes / Inquest Focus:</span>
+                <span className="font-bold text-indigo-300">
+                  {auditTargetId ? '1 Inquest Audit' : scheme >= 2 ? `${Math.floor(scheme / 2)} Card Draw` : scheme === 1 ? '1 Focus (No Target)' : 'None'}
+                </span>
+              </div>
+              <div className="text-slate-300 flex justify-between">
+                <span>Next Day Energy Recovery:</span>
+                <span className="font-bold text-sky-300">+{rest} Energy</span>
+              </div>
+            </div>
+
+            {/* Public Ledger */}
+            <div className="space-y-1.5 text-[11px] p-2.5 rounded bg-[#0b121f] border border-[#1a2638]">
+              <div className="text-slate-400 uppercase text-[10px] tracking-wider font-bold border-b border-[#182333] pb-1 flex items-center justify-between">
+                <span>2. Morning Public Ledger</span>
+                <span className="text-amber-400 font-mono">Published Inscription</span>
+              </div>
+              <div className="text-slate-300 flex justify-between">
+                <span>Inscribed Claim:</span>
+                <span className="font-bold text-amber-300">"{claimedLabor}" Signed in Ink</span>
+              </div>
+              <div className="text-slate-300 flex justify-between">
+                <span>Discrepancy (The Gap):</span>
+                <span className={claimedLabor === (auditTargetId ? 0 : labor) ? 'font-bold text-emerald-400' : claimedLabor > (auditTargetId ? 0 : labor) ? 'font-bold text-amber-400' : 'text-slate-400'}>
+                  {claimedLabor === (auditTargetId ? 0 : labor)
+                    ? '0 (100% Honest)'
+                    : claimedLabor > (auditTargetId ? 0 : labor)
+                    ? `+${claimedLabor - (auditTargetId ? 0 : labor)} Phantom Labor`
+                    : `${claimedLabor - (auditTargetId ? 0 : labor)} Understated`}
+                </span>
+              </div>
+              <div className="text-slate-300 flex justify-between">
+                <span>Audit Risk:</span>
+                <span className={claimedLabor > (auditTargetId ? 0 : labor) ? 'font-bold text-red-400' : 'font-bold text-emerald-400'}>
+                  {claimedLabor > (auditTargetId ? 0 : labor) ? '⚠️ High Risk (-4 Rep if caught)' : '🛡️ Safe (+2 Rep if audited)'}
+                </span>
+              </div>
+              <div className="text-slate-400 text-[10px] pt-0.5 border-t border-[#182333]">
+                {claimedLabor > (auditTargetId ? 0 : labor) ? (
+                  <span className="text-amber-400/90 font-sans">
+                    ⚠️ The public sees {claimedLabor} units, but the Raft ONLY receives {auditTargetId ? 0 : labor} true timber!
+                  </span>
+                ) : (
+                  <span className="text-emerald-400/90 font-sans">
+                    ✓ The Raft will advance by your full contribution of {auditTargetId ? 0 : labor} timber.
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Section 3: Attached Scheme Card (Optional) */}
         <div className="p-4 rounded bg-[#0a101b] border border-[#223147]">
           <div className="flex items-center justify-between mb-2">
@@ -718,7 +886,7 @@ export const ScavengePhase: React.FC<ScavengePhaseProps> = ({
             {selectedScavengeCard && (
               <button
                 type="button"
-                onClick={() => onSelectScavengeCard(null)}
+                onClick={() => onSelectScavengeCard(null, null)}
                 className="text-[11px] text-rose-400 hover:text-rose-300 flex items-center gap-1"
               >
                 <X className="w-3.5 h-3.5" /> Remove Scheme

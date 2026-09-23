@@ -59,6 +59,7 @@ export default function App() {
   const [isTutorialOpen, setIsTutorialOpen] = useState<boolean>(false);
   const [isLeaveModalOpen, setIsLeaveModalOpen] = useState<boolean>(false);
   const [selectedScavengeCard, setSelectedScavengeCard] = useState<SchemeCardId | null>(null);
+  const [selectedScavengeCardIndex, setSelectedScavengeCardIndex] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -223,6 +224,37 @@ export default function App() {
     };
   }, [currentGameId, game?.round]);
 
+  // Synchronize selectedScavengeCard from database current submission (for page reloads or external updates)
+  useEffect(() => {
+    if (currentRoundData && currentUser) {
+      const mySub = currentRoundData.submissions?.[currentUser.uid];
+      if (mySub && mySub.playedCardId) {
+        setSelectedScavengeCard(mySub.playedCardId);
+        if (typeof mySub.playedCardIndex === 'number') {
+          setSelectedScavengeCardIndex(mySub.playedCardIndex);
+        }
+      } else {
+        setSelectedScavengeCard(null);
+        setSelectedScavengeCardIndex(null);
+      }
+    } else {
+      setSelectedScavengeCard(null);
+      setSelectedScavengeCardIndex(null);
+    }
+  }, [currentRoundData, currentUser?.uid]);
+
+  const handleSelectScavengeCard = (cardId: SchemeCardId | null, cardIndex?: number | null) => {
+    setSelectedScavengeCard(cardId);
+    if (cardId === null) {
+      setSelectedScavengeCardIndex(null);
+    } else if (typeof cardIndex === 'number') {
+      setSelectedScavengeCardIndex(cardIndex);
+    } else if (myPrivateProfile?.hand) {
+      const idx = myPrivateProfile.hand.indexOf(cardId);
+      setSelectedScavengeCardIndex(idx >= 0 ? idx : null);
+    }
+  };
+
   // Handlers
   const handleCreateGame = async () => {
     if (!currentUser || !displayName.trim()) return;
@@ -379,6 +411,10 @@ export default function App() {
             roleAction: payload.roleAction,
             rolePayload: payload.rolePayload,
             playedCardId: payload.playedCardId,
+            playedCardIndex:
+              typeof payload.playedCardIndex === 'number'
+                ? payload.playedCardIndex
+                : selectedScavengeCardIndex ?? undefined,
             cardTargetId: payload.cardTargetId,
           },
           claimedLabor: payload.claimedLabor,
@@ -387,6 +423,7 @@ export default function App() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to seal submission');
       setSelectedScavengeCard(null);
+      setSelectedScavengeCardIndex(null);
     } catch (err: any) {
       setError(err.message || 'Error submitting labor allocation');
       throw err;
@@ -431,7 +468,7 @@ export default function App() {
     }
   };
 
-  const handleDiscardCard = async (cardId: SchemeCardId) => {
+  const handleDiscardCard = async (cardId: SchemeCardId, cardIndex?: number) => {
     if (!currentGameId || !currentUser) return;
     setIsLoading(true);
     setError(null);
@@ -443,10 +480,15 @@ export default function App() {
           gameId: currentGameId,
           playerId: currentUser.uid,
           cardId,
+          cardIndex,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to discard card');
+      if (selectedScavengeCardIndex === cardIndex || selectedScavengeCard === cardId) {
+        setSelectedScavengeCard(null);
+        setSelectedScavengeCardIndex(null);
+      }
       return data;
     } catch (err: any) {
       setError(err.message || 'Error discarding card');
@@ -1062,7 +1104,10 @@ export default function App() {
   const submittedCount = currentRoundData?.submittedPlayerIds?.length || 0;
   const isHost = game?.hostId === currentUser?.uid;
 
-  const currentPhase = (game?.roundPhase as 'scavenge' | 'resolution' | 'ledger') || 'scavenge';
+  const currentPhase: 'scavenge' | 'resolution' | 'ledger' | 'launch' =
+    game?.roundPhase === 'launch' || game?.roundPhase === 'postlaunch'
+      ? 'launch'
+      : (game?.roundPhase as 'scavenge' | 'resolution' | 'ledger') || 'scavenge';
 
   return (
     <div className="min-h-screen bg-[#080d1a] text-slate-200 flex flex-col font-serif pb-32">
@@ -1422,11 +1467,13 @@ export default function App() {
                 profile={myPrivateProfile}
                 otherPlayers={otherPlayers}
                 roundNumber={game.round}
+                raftStage={game.raftStage}
                 totalCastaways={players.length}
                 submittedCount={submittedCount}
                 hasSubmitted={hasSubmittedThisRound}
                 selectedScavengeCard={selectedScavengeCard}
-                onSelectScavengeCard={setSelectedScavengeCard}
+                selectedScavengeCardIndex={selectedScavengeCardIndex}
+                onSelectScavengeCard={handleSelectScavengeCard}
                 onSubmitAllocation={handleSubmitAllocation}
                 onExecuteRoleAction={handleExecuteRoleAction}
                 isLoading={isLoading}
@@ -1453,11 +1500,14 @@ export default function App() {
             profile={myPrivateProfile}
             otherPlayers={otherPlayers}
             currentPhase={currentPhase}
+            currentRound={game.round}
+            raftStage={game.raftStage}
             hasPlayedCardThisRound={hasPlayedSchemeThisRound}
             onPlayCard={handlePlayResolutionCard}
             onDiscardCard={handleDiscardCard}
             selectedScavengeCard={selectedScavengeCard}
-            onSelectScavengeCard={setSelectedScavengeCard}
+            selectedScavengeCardIndex={selectedScavengeCardIndex}
+            onSelectScavengeCard={handleSelectScavengeCard}
             isLoading={isLoading}
           />
         </div>

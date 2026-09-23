@@ -79,31 +79,42 @@ export const TutorialModal: React.FC<TutorialModalProps> = ({ isOpen, onClose })
             </div>
           </section>
 
-          <section className="space-y-2">
+          <section className="space-y-3">
             <h3 className="font-serif font-bold text-amber-400 text-base uppercase tracking-wide border-b border-amber-900/30 pb-1">
-              3. The Round Sequence & Decision Making
+              3. Energy Allocation & Public Ledger Translation
             </h3>
             <div className="space-y-3">
               <div>
-                <strong className="text-slate-100 block font-serif">Phase A: Scavenge Phase (Energy Allocation)</strong>
-                You have <strong className="text-amber-300">5 Base Energy</strong> points to allocate secretly:
-                <ul className="list-disc pl-5 mt-1 space-y-1 text-slate-400 font-mono text-xs">
-                  <li>Labor: Genuine work done to advance the Raft.</li>
-                  <li>Stash: Private loot hoarded in your secret stash (needed for buyouts and score).</li>
-                  <li>Scheme: Draw powerful secret cards (Saint, Forgery, Smokescreen, Mutiny, Ghost Write).</li>
-                  <li>Rest: Recover reputation and prepare.</li>
+                <strong className="text-slate-100 block font-serif">A. Secret Night Allocation (5 Base Energy)</strong>
+                <p className="text-slate-400 text-xs">
+                  Each day, you receive energy (base 5 points, plus bonus energy if you rested yesterday). You secretly divide it among 4 actions:
+                </p>
+                <ul className="list-disc pl-5 mt-1 space-y-1 text-slate-300 font-mono text-xs">
+                  <li><strong className="text-amber-300">🔨 Labor (True):</strong> Genuine physical work. <em>This is the ONLY energy that physically advances the Raft.</em> (If you launch an audit on someone, your true labor becomes 0 for that round).</li>
+                  <li><strong className="text-amber-300">🔒 Stash:</strong> Diverts energy into personal provisions (+1 Stash per point). 100% hidden from the public Ledger. Needed for launch buyouts, cards, and endgame score.</li>
+                  <li><strong className="text-amber-300">✨ Scheme & Audit:</strong> Spend 2 Energy to draw a Scheme card, or focus energy to launch a formal inquest audit on a fellow castaway.</li>
+                  <li><strong className="text-amber-300">🌙 Rest:</strong> Sleeping to recover +1 bonus Energy for the following day. Kept confidential.</li>
                 </ul>
-                You then write a <strong className="text-amber-300">declared</strong> Labor contribution in ink on the public Ledger. Lying is allowed! You also select one player to audit.
               </div>
-              <div>
-                <strong className="text-slate-100 block font-serif">Phase B: Resolution Phase (Accounting & Audits)</strong>
-                Scheme cards resolve (e.g. Forged Ledger adds +2 claim, Saint verifies claim if true labor &ge; claim). Audits are executed:
-                <ul className="list-disc pl-5 mt-1 space-y-1 text-slate-400 font-mono text-xs">
-                  <li>Auditing an honest player: They get +2 Rep; you lose 3 Rep (Idealists lose 6).</li>
-                  <li>Auditing a liar: You catch them! They lose 4 Rep; you gain 3 Rep.</li>
-                  <li>Auditing a Ghost: You get "no data" and lose 1 Rep.</li>
+
+              <div className="p-3 rounded bg-[#0e1726] border border-[#22354c] space-y-1.5">
+                <strong className="text-amber-300 block font-serif text-sm">B. How Allocation Translates to the Morning Ledger</strong>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Alongside your secret allocation, you sign a <strong className="text-amber-200">Declared Labor</strong> amount in ink. This declaration is what appears publicly in the morning Ledger:
+                </p>
+                <ul className="list-disc pl-5 space-y-1 text-slate-400 font-mono text-xs">
+                  <li><strong className="text-slate-200">The Public Record:</strong> The Ledger lists each player's <em>Claimed Labor</em> and sums them into a <em>Public Total Pledged</em>. Your Stash, Scheme draws, and Rest are never revealed.</li>
+                  <li><strong className="text-slate-200">The Phantom Gap:</strong> If you claim 4 Labor but secretly hoarded 4 Stash, you created 4 "phantom" units. The table sees a grand total, but the Raft Progress Bar advances <strong>ONLY by True Labor</strong>! If too many castaways lie, construction stalls and fails despite high public claims.</li>
+                  <li><strong className="text-slate-200">Audits:</strong> If someone audits you and you exaggerated your claim, you are exposed as a liar (-4 Reputation to you, +3 to the auditor). If you were truthful, the auditor is disgraced (-3 Reputation to auditor, +2 to you).</li>
+                  <li><strong className="text-slate-200">The Saint Card:</strong> If you attach the Saint card and your True Labor &ge; Claimed Labor, your entry receives an infallible "Divine Truth" verification stamp on the Ledger!</li>
                 </ul>
-                True Labor is summed. If it meets or exceeds the current stage's requirement, the raft advances! Otherwise, the raft fails, and the camp decays.
+              </div>
+
+              <div>
+                <strong className="text-slate-100 block font-serif">C. Resolution Phase & Final Reckoning</strong>
+                <p className="text-slate-400 text-xs">
+                  At dawn, Resolution cards (Mutiny, Sabotage, Bribe) execute, audits publish their findings, and true labor is tallied. At the end of the game, the secret archives are unsealed during <strong className="text-amber-200">The Reckoning</strong>, exposing every castaway's total lifetime gap for all to judge!
+                </p>
               </div>
             </div>
           </section>

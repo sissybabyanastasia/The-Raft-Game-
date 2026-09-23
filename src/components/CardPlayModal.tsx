@@ -21,7 +21,7 @@ interface CardPlayModalProps {
   onConfirmPlay: (cardId: SchemeCardId, targetId?: string) => Promise<void>;
   otherPlayers: PlayerData[];
   profile: PrivatePlayerProfile | null;
-  currentPhase: 'scavenge' | 'resolution' | 'ledger';
+  currentPhase: 'scavenge' | 'resolution' | 'ledger' | 'launch';
   currentLabor?: number;
   currentClaimedLabor?: number;
   isWindowActive?: boolean;
@@ -56,7 +56,8 @@ export const CardPlayModal: React.FC<CardPlayModalProps> = ({
   const hasEnoughStash = playerStash >= card.costStash;
   const isPhaseValid =
     (card.timing === 'scavenge' && currentPhase === 'scavenge') ||
-    (card.timing === 'resolution' && currentPhase === 'resolution' && isWindowActive);
+    (card.timing === 'resolution' && currentPhase === 'resolution' && isWindowActive) ||
+    (cardId === 'mutiny' && currentPhase === 'launch');
 
   // Saint validation
   const isSaintValid = cardId !== 'saint' || canPlaySaint({

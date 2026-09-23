@@ -95,9 +95,21 @@ export const ResolutionWindow: React.FC<ResolutionWindowProps> = ({
   });
 
   const cardsPlayedThisRound = roundData?.cardsPlayed || [];
-  const hasPlayedCardThisRound =
-    cardsPlayedThisRound.some((c) => c.playerId === currentPlayer.id) ||
-    Boolean(roundData?.submissions?.[currentPlayer.id]?.playedCardId);
+  const playerPlayedCard = cardsPlayedThisRound.find((c) => c.playerId === currentPlayer.id);
+  const scavengeSubmissionCardId = roundData?.submissions?.[currentPlayer.id]?.playedCardId;
+  const scavengeSubmissionTargetId = roundData?.submissions?.[currentPlayer.id]?.cardTargetId;
+
+  const playedCardRecord =
+    playerPlayedCard ||
+    (scavengeSubmissionCardId
+      ? {
+          cardId: scavengeSubmissionCardId as SchemeCardId,
+          targetId: scavengeSubmissionTargetId || undefined,
+          timing: 'scavenge' as const,
+        }
+      : null);
+
+  const hasPlayedCardThisRound = Boolean(playedCardRecord);
 
   const otherPlayers = players.filter((p) => p.id !== currentPlayer.id);
 
@@ -140,22 +152,64 @@ export const ResolutionWindow: React.FC<ResolutionWindowProps> = ({
       <div className="my-6">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">
-            Playable Resolution Schemes in Your Hand:
+            {playedCardRecord ? 'Committed Round Scheme:' : 'Playable Resolution Schemes in Your Hand:'}
           </h3>
           {hasPlayedCardThisRound && (
             <span className="text-[11px] text-amber-400 px-2 py-0.5 rounded bg-amber-950/60 border border-amber-800/80">
-              Scheme already played this round
+              Scheme already committed this round
             </span>
           )}
         </div>
 
-        {resolutionCards.length === 0 ? (
+        {playedCardRecord ? (
+          <div className="p-5 rounded-xl bg-gradient-to-r from-[#0d1728] to-[#080d17] border border-amber-600/60 shadow-lg text-slate-200">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="text-xs font-bold font-mono text-emerald-400 uppercase tracking-wider">
+                  Scheme Committed for Overnight Resolution
+                </span>
+              </div>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-800 text-emerald-300">
+                Locked In (1 Card Max)
+              </span>
+            </div>
+            {(() => {
+              const playedDef = SCHEME_CARDS[playedCardRecord.cardId as SchemeCardId];
+              const targetPlayer = otherPlayers.find((p) => p.id === playedCardRecord.targetId);
+              return (
+                <div className="bg-[#0c1424] p-4 rounded-lg border border-[#23354f]">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="font-serif font-bold text-amber-300 text-sm sm:text-base">
+                      {playedDef?.name || playedCardRecord.cardId}
+                    </span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#162338] text-amber-300 border border-[#2b4162] uppercase font-bold">
+                      {playedDef?.timing || 'scavenge'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 font-sans leading-relaxed">
+                    {playedDef?.effect || 'Card effect is recorded and will execute during overnight tally.'}
+                  </p>
+                  {targetPlayer && (
+                    <div className="mt-2 text-xs font-mono text-amber-400 flex items-center gap-1.5">
+                      <span className="text-slate-400">Target Castaway:</span>
+                      <span className="font-bold underline text-amber-300">{targetPlayer.displayName}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+            <p className="text-[11px] font-serif italic text-slate-400 mt-3">
+              Your secret scheme has been officially sealed into this round&apos;s records. It will execute when the morning ledger is certified.
+            </p>
+          </div>
+        ) : resolutionCards.length === 0 ? (
           <div className="p-6 rounded-xl bg-[#0d1424] border border-[#1b263b] text-center text-xs text-slate-500 italic">
             You hold no Resolution-phase Scheme cards (Sabotage, Bribe, Mutiny) in your hand. Awaiting morning ledger tally...
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {resolutionCards.map((cardId) => {
+            {resolutionCards.map((cardId, index) => {
               const card = SCHEME_CARDS[cardId];
               if (!card) return null;
               const hasStash = (profile?.stash || 0) >= card.costStash;
@@ -163,7 +217,7 @@ export const ResolutionWindow: React.FC<ResolutionWindowProps> = ({
 
               return (
                 <div
-                  key={cardId}
+                  key={`${cardId}-${index}`}
                   className={`p-4 rounded-xl border flex flex-col justify-between transition-all ${
                     canPlay
                       ? 'bg-[#121c2e] border-amber-700/60 hover:border-amber-400 shadow-md'

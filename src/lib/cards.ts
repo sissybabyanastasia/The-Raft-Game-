@@ -11,6 +11,7 @@ export const SCHEME_CARDS: Record<SchemeCardId, SchemeCardDefinition> = {
     flavor: 'A drop of seawater blurs a 1 into a 3 with remarkable legibility.',
     requiresTarget: false,
     isPublic: false,
+    minStage: 1,
   },
   bribe: {
     id: 'bribe',
@@ -22,6 +23,7 @@ export const SCHEME_CARDS: Record<SchemeCardId, SchemeCardDefinition> = {
     flavor: 'Tinned peaches speak louder than moral imperatives.',
     requiresTarget: true,
     isPublic: false,
+    minStage: 3,
   },
   whisper_campaign: {
     id: 'whisper_campaign',
@@ -33,6 +35,7 @@ export const SCHEME_CARDS: Record<SchemeCardId, SchemeCardDefinition> = {
     flavor: 'A quiet rumor planted behind the drying rack grows teeth by sunset.',
     requiresTarget: true,
     isPublic: false,
+    minStage: 1,
   },
   sabotage: {
     id: 'sabotage',
@@ -44,6 +47,7 @@ export const SCHEME_CARDS: Record<SchemeCardId, SchemeCardDefinition> = {
     flavor: 'A notched lashing gives way under the second breaker.',
     requiresTarget: false,
     isPublic: false,
+    minStage: 1,
   },
   smokescreen: {
     id: 'smokescreen',
@@ -55,6 +59,7 @@ export const SCHEME_CARDS: Record<SchemeCardId, SchemeCardDefinition> = {
     flavor: "Pointing dramatically at another man's shadow is timeless survival craft.",
     requiresTarget: false,
     isPublic: false,
+    minStage: 1,
   },
   saint: {
     id: 'saint',
@@ -66,6 +71,7 @@ export const SCHEME_CARDS: Record<SchemeCardId, SchemeCardDefinition> = {
     flavor: 'True martyrdom requires an audience and meticulous documentation.',
     requiresTarget: false,
     isPublic: true,
+    minStage: 1,
   },
   ghost_write: {
     id: 'ghost_write',
@@ -77,6 +83,7 @@ export const SCHEME_CARDS: Record<SchemeCardId, SchemeCardDefinition> = {
     flavor: 'If Silas claimed four logs, then surely you carried four as well.',
     requiresTarget: true,
     isPublic: false,
+    minStage: 2,
   },
   mutiny: {
     id: 'mutiny',
@@ -88,6 +95,7 @@ export const SCHEME_CARDS: Record<SchemeCardId, SchemeCardDefinition> = {
     flavor: 'A boat with too many captains needs a very sudden change of heading.',
     requiresTarget: false,
     isPublic: false,
+    minStage: 4,
   },
   propaganda: {
     id: 'propaganda',
@@ -99,6 +107,7 @@ export const SCHEME_CARDS: Record<SchemeCardId, SchemeCardDefinition> = {
     flavor: 'A well-crafted story makes a lazy afternoon look like heroic watchkeeping.',
     requiresTarget: false,
     isPublic: true,
+    minStage: 1,
   },
   blackmail: {
     id: 'blackmail',
@@ -110,6 +119,7 @@ export const SCHEME_CARDS: Record<SchemeCardId, SchemeCardDefinition> = {
     flavor: 'The only thing worse than a wet hammock is a leaked ledger entry.',
     requiresTarget: true,
     isPublic: false,
+    minStage: 2,
   },
   black_market: {
     id: 'black_market',
@@ -121,6 +131,7 @@ export const SCHEME_CARDS: Record<SchemeCardId, SchemeCardDefinition> = {
     flavor: 'A stash coin passed in the shadow of the palm trees buys many favors.',
     requiresTarget: false,
     isPublic: false,
+    minStage: 1,
   },
 };
 
@@ -138,10 +149,59 @@ export const ALL_SCHEME_CARD_IDS: SchemeCardId[] = [
   'black_market',
 ];
 
-export function createShuffledDeck(cardCopies = 3): SchemeCardId[] {
+export const STAGE_CARDS: Record<number, SchemeCardId[]> = {
+  1: [
+    'forged_ledger',
+    'whisper_campaign',
+    'propaganda',
+    'smokescreen',
+    'saint',
+    'sabotage',
+    'black_market',
+  ],
+  2: [
+    'forged_ledger',
+    'whisper_campaign',
+    'propaganda',
+    'smokescreen',
+    'saint',
+    'sabotage',
+    'black_market',
+    'ghost_write',
+    'blackmail',
+  ],
+  3: [
+    'forged_ledger',
+    'whisper_campaign',
+    'propaganda',
+    'smokescreen',
+    'saint',
+    'sabotage',
+    'black_market',
+    'ghost_write',
+    'blackmail',
+    'bribe',
+  ],
+  4: [
+    'forged_ledger',
+    'whisper_campaign',
+    'propaganda',
+    'smokescreen',
+    'saint',
+    'sabotage',
+    'black_market',
+    'ghost_write',
+    'blackmail',
+    'bribe',
+    'mutiny',
+  ],
+};
+
+export function createShuffledDeck(stage: number = 1, cardCopies = 3): SchemeCardId[] {
+  const allowedPool = STAGE_CARDS[Math.min(4, Math.max(1, stage))] || STAGE_CARDS[1];
   const deck: SchemeCardId[] = [];
   for (let i = 0; i < cardCopies; i++) {
-    deck.push(...ALL_SCHEME_CARD_IDS);
+    deck.push(...allowedPool);
   }
   // Fisher-Yates shuffle
   for (let i = deck.length - 1; i > 0; i--) {

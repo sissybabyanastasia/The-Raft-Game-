@@ -1,5 +1,13 @@
 export type RaftStage = 'frame' | 'deck' | 'sail' | 'provisions';
 
+export function getRaftStageNumber(stage?: RaftStage, fallbackRound?: number): number {
+  if (stage === 'frame') return 1;
+  if (stage === 'deck') return 2;
+  if (stage === 'sail') return 3;
+  if (stage === 'provisions') return 4;
+  return Math.min(4, Math.max(1, fallbackRound || 1));
+}
+
 export interface RaftProgress {
   frame: number;
   deck: number;
@@ -204,6 +212,7 @@ export interface SchemeCardDefinition {
   flavor: string;
   requiresTarget: boolean;
   isPublic: boolean;
+  minStage?: number;
 }
 
 export type Archetype =
@@ -417,7 +426,9 @@ export interface PlayerSubmission {
   roleAction?: string | null;
   rolePayload?: any;
   playedCardId?: SchemeCardId | null;
+  playedCardIndex?: number | null;
   cardTargetId?: string | null;
+  cardDeducted?: boolean;
   timestamp?: number;
 }
 
@@ -470,6 +481,8 @@ export interface AllocationPayload {
   roleAction?: string | null;
   rolePayload?: any;
   playedCardId?: SchemeCardId | null;
+  playedCardIndex?: number | null;
   cardTargetId?: string | null;
+  cardDeducted?: boolean;
 }
 

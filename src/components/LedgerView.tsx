@@ -211,6 +211,43 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
           </table>
         </div>
 
+        {/* Bureaucratic Field Notice: How Energy Allocation Translates to this Ledger */}
+        <div className="my-6 p-4 rounded-lg bg-[#070d18] border border-[#1e2f47] font-mono text-xs">
+          <div className="flex items-center gap-2 text-amber-400 font-bold uppercase text-[11px] mb-2.5">
+            <HelpCircle className="w-3.5 h-3.5 text-amber-400" />
+            <span>Field Notice: How Secret Energy Translates to Public Ledger & Raft Reality</span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-[11px] leading-relaxed">
+            <div className="p-3 rounded bg-[#0b1322] border border-[#1b2a40] space-y-1">
+              <div className="font-bold text-slate-200 flex items-center gap-1.5">
+                <span className="text-amber-400">1.</span> Signed In Ink (Pledges)
+              </div>
+              <p className="text-slate-400">
+                The figures in the table above are what each castaway <strong className="text-slate-200">declared</strong> at night. Energy secretly diverted to personal <em>Stash</em>, <em>Schemes</em>, or <em>Rest</em> is completely hidden from these public records.
+              </p>
+            </div>
+
+            <div className="p-3 rounded bg-[#0b1322] border border-[#1b2a40] space-y-1">
+              <div className="font-bold text-slate-200 flex items-center gap-1.5">
+                <span className="text-amber-400">2.</span> The Phantom Gap
+              </div>
+              <p className="text-slate-400">
+                The <strong className="text-amber-300">{publicTotal} Pledged Total</strong> reflects public promises. However, the physical Raft construction bar advances <strong className="text-slate-200">ONLY by True Labor</strong> delivered. If castaways exaggerated their numbers, progress will stall despite high claims!
+              </p>
+            </div>
+
+            <div className="p-3 rounded bg-[#0b1322] border border-[#1b2a40] space-y-1">
+              <div className="font-bold text-slate-200 flex items-center gap-1.5">
+                <span className="text-amber-400">3.</span> Audits & Accountability
+              </div>
+              <p className="text-slate-400">
+                Castaways who allocate energy to Schemes can trigger formal <strong className="text-slate-200">Audits</strong>. Caught liars lose -4 Rep, honest workers gain +2 Rep, and the final endgame Reckoning will expose all historical discrepancies!
+              </p>
+            </div>
+          </div>
+        </div>
+
         {/* Audit Inquest Results Board */}
         {audits.length > 0 && (
           <div className="my-6 p-4 rounded-lg bg-[#070b13] border border-amber-900/60 font-mono">

@@ -418,7 +418,7 @@ export const ElectionPhaseView: React.FC<ElectionPhaseViewProps> = ({
           </div>
 
           <div className="flex items-center gap-3">
-            {stage === 'nomination' && secondsLeft !== null && (
+            {!isHost && stage === 'nomination' && secondsLeft !== null && (
               <div className="flex items-center gap-1.5 px-3 py-1.5 rounded font-mono text-xs font-bold bg-[#121c2e] border border-[#22334b] text-amber-400">
                 <Clock className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
                 <span>{secondsLeft > 0 ? `${Math.floor(secondsLeft / 60)}m ${String(secondsLeft % 60).padStart(2, '0')}s` : 'Closed'}</span>
@@ -429,6 +429,12 @@ export const ElectionPhaseView: React.FC<ElectionPhaseViewProps> = ({
               <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2">
                 {stage !== 'vote' ? (
                   <>
+                    {stage === 'nomination' && secondsLeft !== null && (
+                      <div className="flex items-center gap-1.5 px-3 py-2 rounded font-mono text-xs font-bold bg-[#121c2e] border border-[#22334b] text-amber-400 shadow-sm mr-1">
+                        <Clock className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
+                        <span>{secondsLeft > 0 ? `${Math.floor(secondsLeft / 60)}m ${String(secondsLeft % 60).padStart(2, '0')}s` : 'Closed'}</span>
+                      </div>
+                    )}
                     {stage === 'nomination' && serverNominees.length === 0 && (
                       <button
                         id="force-advance-election-stage-btn"
