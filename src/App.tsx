@@ -1327,6 +1327,7 @@ export default function App() {
             onBlameVote={handleSubmitBlameVote}
             onResolveBlame={handleResolveBlameVote}
             onReset={handleLeaveGame}
+            onTriggerEndgame={() => handleTriggerEndgame(game.status === 'ended' ? 'launch' : 'manual')}
           />
         ) : (
           <main className="w-full max-w-4xl mx-auto p-4 sm:p-6 my-4 space-y-6">

@@ -17,6 +17,7 @@ import {
   Gavel,
   ChevronRight,
   Flame,
+  FileSpreadsheet,
 } from 'lucide-react';
 import type { GameData, PlayerData, PrivatePlayerProfile, EndgameData } from '../types.js';
 
@@ -31,6 +32,7 @@ interface EndgameViewProps {
   onBlameVote: (targetId: string) => Promise<void>;
   onResolveBlame: () => Promise<void>;
   onReset: () => void;
+  onTriggerEndgame?: () => Promise<void>;
 }
 
 export const EndgameView: React.FC<EndgameViewProps> = ({
@@ -44,6 +46,7 @@ export const EndgameView: React.FC<EndgameViewProps> = ({
   onBlameVote,
   onResolveBlame,
   onReset,
+  onTriggerEndgame,
 }) => {
   const endgame = game.endgame;
   const isHost = game.hostId === currentUserId;
@@ -57,6 +60,32 @@ export const EndgameView: React.FC<EndgameViewProps> = ({
   const [hasVotedBlame, setHasVotedBlame] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [forceAdvanceEnabled, setForceAdvanceEnabled] = useState(false);
+  const [isCompiling, setIsCompiling] = useState(false);
+  const [compileError, setCompileError] = useState<string | null>(null);
+
+  // Auto-trigger compilation if endgame is not initialized
+  useEffect(() => {
+    if (!endgame && !isCompiling) {
+      setIsCompiling(true);
+      if (onTriggerEndgame) {
+        onTriggerEndgame()
+          .catch((err: any) => {
+            setCompileError(err?.message || 'Compiling...');
+          })
+          .finally(() => setIsCompiling(false));
+      } else {
+        fetch('/api/game/endgame/trigger', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ gameId: game.id, reason: 'launch' }),
+        })
+          .catch((err) => {
+            setCompileError(err?.message || 'Compiling...');
+          })
+          .finally(() => setIsCompiling(false));
+      }
+    }
+  }, [endgame, game.id]);
 
   // Time remaining for Step B (60s) or Step D (30s)
   const [secondsRemaining, setSecondsRemaining] = useState<number | null>(null);
@@ -167,11 +196,56 @@ export const EndgameView: React.FC<EndgameViewProps> = ({
   if (!endgame) {
     return (
       <div className="min-h-screen bg-[#070b14] text-slate-200 flex items-center justify-center p-6 font-mono">
-        <div className="text-center space-y-4">
-          <div className="text-amber-500 text-sm animate-pulse uppercase tracking-widest">
-            Compiling True Ledger...
+        <div className="max-w-md w-full text-center space-y-5 bg-[#0c1322] border border-[#20314a] p-8 rounded-lg shadow-2xl">
+          <div className="w-12 h-12 mx-auto rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+            <FileSpreadsheet className="w-6 h-6 animate-pulse" />
           </div>
-          <p className="text-xs text-slate-400">Summoning the island tribunal.</p>
+          <div>
+            <div className="text-amber-400 text-sm font-bold uppercase tracking-widest">
+              Compiling the True Ledger...
+            </div>
+            <p className="text-xs text-slate-400 mt-2 leading-relaxed">
+              Summoning the island tribunal to reconcile all secret stashes, physical labor, claimed records, and the final fates of the castaways.
+            </p>
+          </div>
+
+          {compileError && (
+            <div className="p-3 bg-red-950/60 border border-red-800 rounded text-red-300 text-xs">
+              {compileError}
+            </div>
+          )}
+
+          <div className="pt-2 flex justify-center">
+            <button
+              onClick={async () => {
+                try {
+                  setIsCompiling(true);
+                  setCompileError(null);
+                  if (onTriggerEndgame) {
+                    await onTriggerEndgame();
+                  } else {
+                    const res = await fetch('/api/game/endgame/trigger', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ gameId: game.id, reason: 'launch' }),
+                    });
+                    if (!res.ok) {
+                      const data = await res.json();
+                      throw new Error(data.error || 'Failed to trigger endgame');
+                    }
+                  }
+                } catch (e: any) {
+                  setCompileError(e.message || 'Error compiling ledger');
+                } finally {
+                  setIsCompiling(false);
+                }
+              }}
+              disabled={isCompiling}
+              className="px-5 py-2.5 rounded bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-slate-950 font-bold text-xs uppercase tracking-wider transition-colors font-mono shadow-lg"
+            >
+              {isCompiling ? 'Reconciling Ledger...' : 'Compile Ledger Now'}
+            </button>
+          </div>
         </div>
       </div>
     );

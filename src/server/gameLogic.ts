@@ -2603,6 +2603,13 @@ async function finalizeLaunch(
     gmNarration: launchScene,
   });
 
+  // Automatically trigger Endgame sequence so True Ledger is compiled immediately upon launch
+  try {
+    await triggerEndgame(gameId, 'launch');
+  } catch (err) {
+    console.error('Failed to trigger endgame from finalizeLaunch:', err);
+  }
+
   return { success: true, launchData, launchScene };
 }
 
@@ -3990,52 +3997,52 @@ export async function triggerEndgame(
     return (gaps[b.id] || 0) - (gaps[a.id] || 0);
   });
 
-  // Generate reveals with Gemini narration
-  const reveals: EndgameRevealItem[] = [];
-  for (let idx = 0; idx < sortedPlayers.length; idx++) {
-    const p = sortedPlayers[idx];
-    const prof = privateProfiles[p.id];
-    const role = prof?.role || 'ORDINARY_PERSON';
-    const trueL = trueTotals[p.id] || 0;
-    const claimL = claimedTotals[p.id] || 0;
-    const gap = gaps[p.id] || 0;
-    const stash = prof?.stash ?? p.stash ?? 0;
-    const rep = p.reputation || 0;
-    const fate = playerFates[p.id] || 'LEFT BEHIND';
-    const cardsPlayed = cardsPlayedCount[p.id] || 0;
+  // Generate reveals with Gemini narration in parallel
+  const reveals: EndgameRevealItem[] = await Promise.all(
+    sortedPlayers.map(async (p, idx) => {
+      const prof = privateProfiles[p.id];
+      const role = prof?.role || 'ORDINARY_PERSON';
+      const trueL = trueTotals[p.id] || 0;
+      const claimL = claimedTotals[p.id] || 0;
+      const gap = gaps[p.id] || 0;
+      const stash = prof?.stash ?? p.stash ?? 0;
+      const rep = p.reputation || 0;
+      const fate = playerFates[p.id] || 'LEFT BEHIND';
+      const cardsPlayed = cardsPlayedCount[p.id] || 0;
 
-    let narration = '';
-    try {
-      narration = await generateEndgameAccountingNarration({
-        displayName: p.displayName,
+      let narration = '';
+      try {
+        narration = await generateEndgameAccountingNarration({
+          displayName: p.displayName,
+          role,
+          gap,
+          trueLabor: trueL,
+          claimedLabor: claimL,
+          stash,
+          reputation: rep,
+          fate,
+          cardsPlayedCount: cardsPlayed,
+        });
+      } catch {
+        narration = `${p.displayName} withheld ${gap} labor beneath an assumed guise, concluding their passage as ${fate}.`;
+      }
+
+      return {
+        playerId: p.id,
+        playerName: p.displayName,
+        order: idx,
         role,
-        gap,
         trueLabor: trueL,
         claimedLabor: claimL,
+        gap,
         stash,
         reputation: rep,
-        fate,
         cardsPlayedCount: cardsPlayed,
-      });
-    } catch {
-      narration = `${p.displayName} withheld ${gap} labor beneath an assumed guise, concluding their passage as ${fate}.`;
-    }
-
-    reveals.push({
-      playerId: p.id,
-      playerName: p.displayName,
-      order: idx,
-      role,
-      trueLabor: trueL,
-      claimedLabor: claimL,
-      gap,
-      stash,
-      reputation: rep,
-      cardsPlayedCount: cardsPlayed,
-      seatStatus: fate,
-      narration,
-    });
-  }
+        seatStatus: fate,
+        narration,
+      };
+    })
+  );
 
   let outcomeStr = 'STRANDED';
   if (triggerReason === 'launch' || (launchData?.seats && launchData.seats.length > 0)) {
