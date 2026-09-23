@@ -25,7 +25,7 @@ interface EndgameViewProps {
   players: PlayerData[];
   currentUserId: string;
   userProfile: PrivatePlayerProfile | null;
-  onAdvanceStep: () => Promise<void>;
+  onAdvanceStep: (force?: boolean) => Promise<void>;
   onConfess: (text: string) => Promise<void>;
   onAdvanceReveal: () => Promise<void>;
   onBlameVote: (targetId: string) => Promise<void>;
@@ -56,6 +56,7 @@ export const EndgameView: React.FC<EndgameViewProps> = ({
   const [selectedBlameTarget, setSelectedBlameTarget] = useState<string>('');
   const [hasVotedBlame, setHasVotedBlame] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [forceAdvanceEnabled, setForceAdvanceEnabled] = useState(false);
 
   // Time remaining for Step B (60s) or Step D (30s)
   const [secondsRemaining, setSecondsRemaining] = useState<number | null>(null);
@@ -279,7 +280,7 @@ export const EndgameView: React.FC<EndgameViewProps> = ({
                 </span>
                 <button
                   id="proceed-to-confessions-btn"
-                  onClick={onAdvanceStep}
+                  onClick={() => onAdvanceStep(false)}
                   className="w-full sm:w-auto px-5 py-2.5 rounded font-bold text-xs uppercase tracking-wider bg-amber-600 hover:bg-amber-500 text-slate-950 flex items-center justify-center gap-2 transition-colors shadow-lg"
                 >
                   Proceed to Confessions (Step B)
@@ -367,18 +368,56 @@ export const EndgameView: React.FC<EndgameViewProps> = ({
               )}
 
               {/* Host Advance Override */}
-              <div className="pt-4 border-t border-[#1a263a] flex items-center justify-between text-xs text-slate-500">
-                <span>
-                  {Object.keys(endgame.confessions || {}).length} of {players.length} castaways submitted.
-                </span>
-                <button
-                  id="advance-to-reveal-btn"
-                  onClick={onAdvanceStep}
-                  className="px-4 py-2 rounded bg-[#162234] hover:bg-[#20324c] text-slate-200 text-xs font-bold uppercase tracking-wider transition-colors"
-                >
-                  Begin Truth Reveal (Step C) →
-                </button>
-              </div>
+              {(() => {
+                const nonBots = players.filter(p => !p.isBot);
+                const totalNonBots = nonBots.length;
+                const currentConfessions = endgame.confessions || {};
+                const confessionsByNonBots = nonBots.filter(p => currentConfessions[p.id] && currentConfessions[p.id] !== 'They said nothing.').length;
+                const allNonBotsConfessed = confessionsByNonBots >= Math.ceil(totalNonBots / 2);
+
+                return (
+                  <div className="pt-4 border-t border-[#1a263a] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 w-full">
+                    <div className="flex flex-col gap-0.5">
+                      <span>
+                        Human Confessions: {confessionsByNonBots} / {totalNonBots} ({allNonBotsConfessed ? 'Complete' : 'Awaiting'})
+                      </span>
+                      <span className="text-[10px] text-slate-600">
+                        Total Confessions Sealed: {Object.keys(currentConfessions).length} / {players.length}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      {isHost && (
+                        <div className="flex items-center gap-1.5 bg-[#0a111e]/80 px-2 py-1.5 rounded border border-[#1b2d42]">
+                          <input
+                            type="checkbox"
+                            id="bmac-confession-force-checkbox"
+                            checked={forceAdvanceEnabled}
+                            onChange={(e) => setForceAdvanceEnabled(e.target.checked)}
+                            className="rounded border-[#23354d] text-amber-500 focus:ring-0 w-3.5 h-3.5 cursor-pointer"
+                          />
+                          <label htmlFor="bmac-confession-force-checkbox" className="text-[10px] text-slate-300 font-bold uppercase tracking-wide cursor-pointer select-none">
+                            Force Advance
+                          </label>
+                        </div>
+                      )}
+
+                      <button
+                        id="advance-to-reveal-btn"
+                        onClick={() => onAdvanceStep(forceAdvanceEnabled)}
+                        disabled={!allNonBotsConfessed && !forceAdvanceEnabled}
+                        className={`px-4 py-2 rounded text-xs font-bold uppercase tracking-wider transition-colors ${
+                          (!allNonBotsConfessed && !forceAdvanceEnabled)
+                            ? 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-50'
+                            : 'bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold shadow-md cursor-pointer'
+                        }`}
+                      >
+                        Begin Truth Reveal (Step C) →
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}

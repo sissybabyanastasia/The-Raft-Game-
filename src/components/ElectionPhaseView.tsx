@@ -10,7 +10,7 @@ interface ElectionPhaseViewProps {
   isHost: boolean;
   onNominate: (promiseText: string) => Promise<void>;
   onVote: (targetNomineeId: string) => Promise<void>;
-  onAdvanceStage: () => Promise<void>;
+  onAdvanceStage: (force?: boolean) => Promise<void>;
   onResolveElection: () => Promise<void>;
   isLoading: boolean;
 }
@@ -362,23 +362,35 @@ export const ElectionPhaseView: React.FC<ElectionPhaseViewProps> = ({
           </div>
 
           {isHost && (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2">
               {stage !== 'vote' ? (
-                <button
-                  id="advance-election-stage-btn"
-                  onClick={onAdvanceStage}
-                  disabled={isLoading}
-                  className="px-5 py-2.5 rounded font-mono font-bold text-xs uppercase tracking-wider bg-[#ea580c] hover:bg-[#c2410c] text-white disabled:opacity-50 transition-colors flex items-center gap-1.5"
-                >
-                  <span>Advance to {stage === 'nomination' ? 'Campaign' : 'Voting'}</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
+                <>
+                  {stage === 'nomination' && serverNominees.length === 0 && (
+                    <button
+                      id="force-advance-election-stage-btn"
+                      onClick={() => onAdvanceStage(true)}
+                      disabled={isLoading}
+                      className="px-3 py-1.5 rounded font-mono text-[10px] uppercase bg-red-950/40 hover:bg-red-900/60 text-red-300 border border-red-800/60 transition-colors cursor-pointer"
+                    >
+                      Force Advance (No Nominees)
+                    </button>
+                  )}
+                  <button
+                    id="advance-election-stage-btn"
+                    onClick={() => onAdvanceStage(false)}
+                    disabled={isLoading}
+                    className="px-5 py-2.5 rounded font-mono font-bold text-xs uppercase tracking-wider bg-[#ea580c] hover:bg-[#c2410c] text-white disabled:opacity-50 transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <span>Advance to {stage === 'nomination' ? 'Campaign' : 'Voting'}</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </>
               ) : (
                 <button
                   id="resolve-election-btn"
                   onClick={onResolveElection}
                   disabled={isLoading}
-                  className="px-5 py-2.5 rounded font-mono font-bold text-xs uppercase tracking-wider bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 transition-colors flex items-center gap-1.5 shadow-lg"
+                  className="px-5 py-2.5 rounded font-mono font-bold text-xs uppercase tracking-wider bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 transition-colors flex items-center gap-1.5 shadow-lg cursor-pointer"
                 >
                   <Vote className="w-4 h-4" />
                   Tally Ballots & Inaugurate

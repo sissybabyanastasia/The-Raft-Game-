@@ -673,7 +673,7 @@ export default function App() {
     }
   };
 
-  const handleAdvanceElectionStage = async () => {
+  const handleAdvanceElectionStage = async (force?: boolean) => {
     if (!currentGameId || !currentUser) return;
     setIsLoading(true);
     try {
@@ -683,6 +683,7 @@ export default function App() {
         body: JSON.stringify({
           gameId: currentGameId,
           hostId: currentUser.uid,
+          force: !!force,
         }),
       });
       const data = await res.json();
@@ -866,7 +867,7 @@ export default function App() {
     }
   };
 
-  const handleAdvanceEndgameStep = async () => {
+  const handleAdvanceEndgameStep = async (force?: boolean) => {
     if (!currentGameId) return;
     setIsLoading(true);
     try {
@@ -876,6 +877,7 @@ export default function App() {
         body: JSON.stringify({
           gameId: currentGameId,
           hostId: currentUser?.uid,
+          force: !!force,
         }),
       });
       const data = await res.json();

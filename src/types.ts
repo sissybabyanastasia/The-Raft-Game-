@@ -178,6 +178,7 @@ export interface LaunchData {
   stepStartedAt?: number;
   stepClosesAt?: number;
   drownedPlayerIds?: string[];
+  resolving?: boolean;
 }
 
 export type SchemeCardId =

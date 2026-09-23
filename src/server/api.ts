@@ -370,11 +370,11 @@ apiRouter.post('/game/election/nominate', async (req: Request, res: Response) =>
 // Election Phase: Advance Stage
 apiRouter.post('/game/election/advance', async (req: Request, res: Response) => {
   try {
-    const { gameId, hostId } = req.body;
+    const { gameId, hostId, force } = req.body;
     if (!gameId || !hostId) {
       return res.status(400).json({ error: 'gameId and hostId are required' });
     }
-    const result = await advanceElectionStage(gameId, hostId);
+    const result = await advanceElectionStage(gameId, hostId, !!force);
     res.json(result);
   } catch (error: any) {
     console.error('Election advance error:', error);
@@ -524,11 +524,11 @@ apiRouter.post('/game/endgame/trigger', async (req: Request, res: Response) => {
 // Advance Endgame step (Accounting -> Confession -> Reveal -> Blame Vote -> Verdict)
 apiRouter.post('/game/endgame/advance', async (req: Request, res: Response) => {
   try {
-    const { gameId, hostId } = req.body;
+    const { gameId, hostId, force } = req.body;
     if (!gameId) {
       return res.status(400).json({ error: 'gameId is required' });
     }
-    const result = await advanceEndgameStep(gameId, hostId);
+    const result = await advanceEndgameStep(gameId, hostId, !!force);
     res.json(result);
   } catch (error: any) {
     console.error('Advance endgame step error:', error);

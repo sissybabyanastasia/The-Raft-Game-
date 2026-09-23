@@ -66,6 +66,7 @@ export const LaunchPhaseView: React.FC<LaunchPhaseViewProps> = ({
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [showMutinyModal, setShowMutinyModal] = useState<boolean>(false);
+  const [forceResolveEnabled, setForceResolveEnabled] = useState<boolean>(false);
 
   const hasMutinyCard = userProfile?.hand?.includes('mutiny');
   const userStash = userProfile?.stash || 0;
@@ -435,21 +436,54 @@ export const LaunchPhaseView: React.FC<LaunchPhaseViewProps> = ({
             )}
 
             {/* Host Resolve Vote Button */}
-            {(isHost || userHasVoted) && (
-              <div className="pt-3 border-t border-[#1b263b] flex justify-between items-center text-xs font-mono text-slate-500">
-                <span>
-                  Votes Recorded: {Object.keys(launchData.pendingVotes || {}).length} / {unseatedPlayers.length}
-                </span>
-                <button
-                  id="force-resolve-vote-btn"
-                  onClick={handleAdvance}
-                  disabled={isSubmitting}
-                  className="px-3 py-1.5 rounded bg-[#1c2a3f] hover:bg-[#283b58] text-slate-200 font-mono text-xs transition-colors"
-                >
-                  Tally & Resolve Votes
-                </button>
-              </div>
-            )}
+            {(isHost || userHasVoted) && (() => {
+              const unseatedNonBots = unseatedPlayers.filter(p => !p.isBot);
+              const unseatedNonBotVotes = unseatedNonBots.filter(p => launchData.pendingVotes && !!launchData.pendingVotes[p.id]).length;
+              const allUnseatedNonBotsVoted = unseatedNonBots.every(p => launchData.pendingVotes && !!launchData.pendingVotes[p.id]);
+
+              return (
+                <div className="pt-3 border-t border-[#1b263b] flex flex-col sm:flex-row gap-3 justify-between items-center text-xs font-mono text-slate-500 w-full">
+                  <div className="flex flex-col gap-0.5">
+                    <span>
+                      Human Voters: {unseatedNonBotVotes} / {unseatedNonBots.length} ({allUnseatedNonBotsVoted ? 'Complete' : 'Awaiting'})
+                    </span>
+                    <span className="text-[10px] text-slate-600">
+                      Total Votes Cast: {Object.keys(launchData.pendingVotes || {}).length} / {unseatedPlayers.length}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    {isHost && (
+                      <div className="flex items-center gap-1.5 bg-[#0a111e]/80 px-2 py-1.5 rounded border border-[#1b2d42]">
+                        <input
+                          type="checkbox"
+                          id="bmac-force-resolve-checkbox"
+                          checked={forceResolveEnabled}
+                          onChange={(e) => setForceResolveEnabled(e.target.checked)}
+                          className="rounded border-[#23354d] text-amber-500 focus:ring-0 w-3.5 h-3.5 cursor-pointer"
+                        />
+                        <label htmlFor="bmac-force-resolve-checkbox" className="text-[10px] text-slate-300 font-bold uppercase tracking-wide cursor-pointer select-none">
+                          Force Resolve
+                        </label>
+                      </div>
+                    )}
+
+                    <button
+                      id="force-resolve-vote-btn"
+                      onClick={handleAdvance}
+                      disabled={isSubmitting || (!allUnseatedNonBotsVoted && !forceResolveEnabled)}
+                      className={`px-3 py-1.5 rounded font-mono text-xs transition-colors ${
+                        (!allUnseatedNonBotsVoted && !forceResolveEnabled)
+                          ? 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-50'
+                          : 'bg-emerald-600 hover:bg-emerald-500 text-white font-bold shadow-md'
+                      }`}
+                    >
+                      Tally & Resolve Votes
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         )}
 

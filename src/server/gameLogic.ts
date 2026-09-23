@@ -909,22 +909,33 @@ export async function finalizeResolution(gameId: string, roundNumber: number) {
   // Mark as resolving and close window immediately to block race condition
   await updateDoc(roundRef, { resolutionWindowOpen: false, resolving: true });
 
-  const gameRef = doc(db, 'games', gameId);
-  const gameSnap = await getDoc(gameRef);
-  if (!gameSnap.exists()) return;
-  const gameData = gameSnap.data();
+  try {
+    const gameRef = doc(db, 'games', gameId);
+    const gameSnap = await getDoc(gameRef);
+    if (!gameSnap.exists()) return;
+    const gameData = gameSnap.data();
 
-  const playersRef = collection(db, `games/${gameId}/players`);
-  const allPlayersSnap = await getDocs(playersRef);
-  const allPlayers: any[] = allPlayersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const playersRef = collection(db, `games/${gameId}/players`);
+    const allPlayersSnap = await getDocs(playersRef);
+    const allPlayers: any[] = allPlayersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-  // Re-read latest cardsPlayed in case a card was committed right before locking
-  const latestRoundSnap = await getDoc(roundRef);
-  const latestCardsPlayed: CardPlayRecord[] = latestRoundSnap.exists()
-    ? (latestRoundSnap.data().cardsPlayed || [])
-    : (roundData.cardsPlayed || []);
+    // Re-read latest cardsPlayed in case a card was committed right before locking
+    const latestRoundSnap = await getDoc(roundRef);
+    const latestCardsPlayed: CardPlayRecord[] = latestRoundSnap.exists()
+      ? (latestRoundSnap.data().cardsPlayed || [])
+      : (roundData.cardsPlayed || []);
 
-  await resolveRound(gameId, roundNumber, roundData.submissions || {}, allPlayers, gameData, latestCardsPlayed);
+    await resolveRound(gameId, roundNumber, roundData.submissions || {}, allPlayers, gameData, latestCardsPlayed);
+  } catch (error: any) {
+    // FIX-04: Wrap resolveRound() in try/catch. On any error, reset roundData.resolving = false and resolutionWindowOpen = true with a 15s extension
+    console.error(`FIX-04: Error resolving round ${roundNumber} in game ${gameId}:`, error);
+    await updateDoc(roundRef, {
+      resolving: false,
+      resolutionWindowOpen: true,
+      closesAt: Date.now() + 15000,
+    }).catch((dbErr) => console.error('Failed to reset resolving status on round database entry:', dbErr));
+    throw error;
+  }
 }
 
 export async function resolveRound(
@@ -1860,6 +1871,7 @@ export async function advanceLaunchStep(gameId: string, hostId?: string) {
 
       if (launchData.seats.length >= totalSeats) {
         launchData.state = 'done';
+        launchData.resolving = false;
         return finalizeLaunch(gameId, gameData, launchData, allPlayers);
       } else {
         launchData.state = 'buyout';
@@ -1868,6 +1880,7 @@ export async function advanceLaunchStep(gameId: string, hostId?: string) {
       }
     }
 
+    launchData.resolving = false;
     await updateDoc(gameRef, {
       launchData,
       seats: launchData.seats,
@@ -2197,11 +2210,35 @@ export async function submitLaunchVote(gameId: string, voterId: string, targetId
   const playersRef = collection(db, `games/${gameId}/players`);
   const playersSnap = await getDocs(playersRef);
   const seatedIds = new Set(currentSeats.map(s => s.playerId));
-  const unseatedPlayers = playersSnap.docs.filter(d => !seatedIds.has(d.id) && !d.data()?.isDrowned);
 
-  if (unseatedPlayers.every(p => pendingVotes[p.id])) {
-    // Auto resolve vote step
-    await advanceLaunchStep(gameId);
+  // FIX-05: auto-tally only when (a) every unseated non-bot player has voted AND (b) host has not manually advanced. Add launchData.resolving flag.
+  const launchDataFreshSnap = await getDoc(gameRef);
+  const latestGameData = launchDataFreshSnap.data();
+  if (latestGameData && latestGameData.launchData?.state === 'vote' && !latestGameData.launchData?.resolving) {
+    const freshLaunchData = latestGameData.launchData;
+    const latestPendingVotes = freshLaunchData.pendingVotes || {};
+
+    const unseatedNonBots = playersSnap.docs.filter(d => {
+      const pData = d.data();
+      return !seatedIds.has(d.id) && !pData?.isDrowned && !pData?.isBot;
+    });
+
+    if (unseatedNonBots.length > 0 && unseatedNonBots.every(p => latestPendingVotes[p.id])) {
+      freshLaunchData.resolving = true;
+      await updateDoc(gameRef, { launchData: freshLaunchData });
+
+      try {
+        await advanceLaunchStep(gameId);
+      } catch (err) {
+        console.error('FIX-05 Error auto-advancing launch vote:', err);
+        const errorRefreshSnap = await getDoc(gameRef);
+        const errorLaunchData = errorRefreshSnap.data()?.launchData;
+        if (errorLaunchData) {
+          errorLaunchData.resolving = false;
+          await updateDoc(gameRef, { launchData: errorLaunchData });
+        }
+      }
+    }
   }
 
   return { success: true };
@@ -2615,7 +2652,7 @@ export async function nominateGovernor(
   return { success: true, nominee: newNominee };
 }
 
-export async function advanceElectionStage(gameId: string, hostId: string) {
+export async function advanceElectionStage(gameId: string, hostId: string, force: boolean = false) {
   const gameRef = doc(db, 'games', gameId);
   const gameSnap = await getDoc(gameRef);
   if (!gameSnap.exists()) throw new Error('Game not found.');
@@ -2630,18 +2667,28 @@ export async function advanceElectionStage(gameId: string, hostId: string) {
   const playersList = playersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
   if (election.stage === 'nomination') {
+    // FIX-01: refuse to advance from 'nomination' → 'campaign' unless at least one nominee exists OR host passes force: true
+    const nominees = election.nominees || [];
+    if (nominees.length === 0 && !force) {
+      throw new Error('No candidates have registered for the election yet. Awaiting nominees.');
+    }
     election.stage = 'campaign';
     await updateDoc(gameRef, {
       activeElection: election,
       gmNarration: 'Candidates have made their sworn promises; the campaign floor is open to debate.',
     });
   } else if (election.stage === 'campaign') {
+    // FIX-01: refuse to advance from 'campaign' → 'vote' unless nominees.length >= 1
+    const nominees = election.nominees || [];
+    if (nominees.length === 0) {
+      throw new Error('The ballot is empty. At least one candidate must register to open voting.');
+    }
     election.stage = 'vote';
 
     // If nominee list is empty when opening ballots, auto-populate all players so ballot is not empty
-    let nominees = election.nominees ? [...election.nominees] : [];
-    if (nominees.length === 0) {
-      nominees = playersList.map((p) => ({
+    let nomineesList = election.nominees ? [...election.nominees] : [];
+    if (nomineesList.length === 0) {
+      nomineesList = playersList.map((p) => ({
         playerId: p.id,
         playerName: (p as any).displayName || 'A Castaway',
         promise: 'Colony service, order, and honest labor.',
@@ -2652,15 +2699,15 @@ export async function advanceElectionStage(gameId: string, hostId: string) {
         },
         votesReceived: 0,
       }));
-      election.nominees = nominees;
+      election.nominees = nomineesList;
     }
 
     // Auto-cast ballots for bots upon opening the ballot so that participation is visible
-    if (nominees.length > 0) {
+    if (nomineesList.length > 0) {
       const votes = { ...(election.votes || {}) };
       for (const p of playersList) {
         if ((p as any).isBot && !votes[p.id]) {
-          const pick = nominees[Math.floor(Math.random() * nominees.length)];
+          const pick = nomineesList[Math.floor(Math.random() * nomineesList.length)];
           votes[p.id] = pick.playerId;
         }
       }
@@ -2736,6 +2783,20 @@ export async function resolveElection(gameId: string) {
   const playersRef = collection(db, `games/${gameId}/players`);
   const playersSnap = await getDocs(playersRef);
   const playersList = playersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+  // FIX-02: Require that the number of non-bot votes cast is >= ceil(activePlayerCount / 2).
+  // Do not silently auto-vote for bots to reach quorum.
+  const activeNonBots = playersList.filter((p: any) => !p.isBot && p.status !== 'marooned' && p.status !== 'abandoned');
+  const activeNonBotCount = activeNonBots.length;
+  const nonBotVotesCast = Object.keys(votes).filter((voterId) => {
+    const voter = playersList.find((p) => p.id === voterId);
+    return voter && !(voter as any).isBot;
+  }).length;
+
+  const quorumRequired = Math.ceil(activeNonBotCount / 2);
+  if (nonBotVotesCast < quorumRequired) {
+    throw new Error('Not enough ballots cast to resolve the election.');
+  }
 
   // Auto-vote for bots if needed
   for (const p of playersList) {
@@ -3806,7 +3867,7 @@ export async function resolveBlameVote(gameId: string) {
 /**
  * Advance Endgame step (Accounting -> Confession -> Reveal -> Blame Vote -> Verdict)
  */
-export async function advanceEndgameStep(gameId: string, hostId?: string) {
+export async function advanceEndgameStep(gameId: string, hostId?: string, force: boolean = false) {
   const gameRef = doc(db, 'games', gameId);
   const gameSnap = await getDoc(gameRef);
   if (!gameSnap.exists()) throw new Error('Game not found.');
@@ -3824,9 +3885,22 @@ export async function advanceEndgameStep(gameId: string, hostId?: string) {
   }
 
   if (endgame.step === 'confession') {
-    // Fill in default confessions for those who submitted nothing
     const playersCol = collection(db, `games/${gameId}/players`);
     const playersSnap = await getDocs(playersCol);
+    const playersList = playersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+    // FIX-03: If fewer than half of non-bot players have submitted a confession, refuse unless force is true
+    const nonBots = playersList.filter((p: any) => !p.isBot && p.status !== 'marooned' && p.status !== 'abandoned');
+    const totalNonBots = nonBots.length;
+    const currentConfessions = endgame.confessions || {};
+    const submissionsByNonBots = nonBots.filter((p: any) => currentConfessions[p.id] && currentConfessions[p.id] !== 'They said nothing.').length;
+
+    const confessionQuorum = Math.ceil(totalNonBots / 2);
+    if (submissionsByNonBots < confessionQuorum && !force) {
+      throw new Error('Not enough players have submitted confessions yet. Awaiting participants.');
+    }
+
+    // Fill in default confessions for those who submitted nothing
     for (const d of playersSnap.docs) {
       if (!endgame.confessions[d.id]) {
         endgame.confessions[d.id] = 'They said nothing.';
