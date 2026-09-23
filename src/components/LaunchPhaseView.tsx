@@ -15,6 +15,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import type { GameData, PlayerData, PrivatePlayerProfile, RaftSeat } from '../types.js';
+import { ConfirmSkipModal } from './ConfirmSkipModal.js';
 
 interface LaunchPhaseViewProps {
   game: GameData;
@@ -67,6 +68,7 @@ export const LaunchPhaseView: React.FC<LaunchPhaseViewProps> = ({
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [showMutinyModal, setShowMutinyModal] = useState<boolean>(false);
   const [forceResolveEnabled, setForceResolveEnabled] = useState<boolean>(false);
+  const [isConfirmSkipOpen, setIsConfirmSkipOpen] = useState<boolean>(false);
 
   const hasMutinyCard = userProfile?.hand?.includes('mutiny');
   const userStash = userProfile?.stash || 0;
@@ -135,6 +137,10 @@ export const LaunchPhaseView: React.FC<LaunchPhaseViewProps> = ({
   };
 
   const handleAdvance = async () => {
+    setIsConfirmSkipOpen(true);
+  };
+
+  const executeAdvance = async () => {
     try {
       setIsSubmitting(true);
       setErrorMessage('');
@@ -723,6 +729,28 @@ export const LaunchPhaseView: React.FC<LaunchPhaseViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Shared Host Skip Timer Confirmation Modal */}
+      <ConfirmSkipModal
+        isOpen={isConfirmSkipOpen}
+        onClose={() => setIsConfirmSkipOpen(false)}
+        onConfirm={executeAdvance}
+        title="Advance Launch Step?"
+        description="Are you sure you want to end this launch step early? Active players still voting or managing their survival will lose their remaining time."
+        awaitingCount={(() => {
+          const unseatedPlayers = players.filter((p: any) => p.status !== 'marooned' && p.status !== 'abandoned' && !(launchData.seats || []).some((s: any) => s.playerId === p.id));
+          const unseatedNonBots = unseatedPlayers.filter(p => !p.isBot);
+          if (launchData.state === 'vote') {
+            const unseatedNonBotVotes = unseatedNonBots.filter(p => launchData.pendingVotes && !!launchData.pendingVotes[p.id]).length;
+            return unseatedNonBots.length - unseatedNonBotVotes;
+          } else if (launchData.state === 'buyout') {
+            const bidPlayerIds = new Set((launchData.buyouts || []).map(b => b.playerId));
+            return unseatedNonBots.filter(p => !bidPlayerIds.has(p.id)).length;
+          }
+          return unseatedNonBots.length;
+        })()}
+        awaitingLabel={launchData.state === 'vote' ? "human players who haven't cast their roll-call vote" : launchData.state === 'buyout' ? "human players who haven't submitted a buyout bid" : "human players eligible to act"}
+      />
     </div>
   );
 };

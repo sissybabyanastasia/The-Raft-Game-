@@ -17,6 +17,9 @@ import {
   ShieldCheck,
   Feather,
   Flame,
+  Megaphone,
+  Lock,
+  Store,
 } from 'lucide-react';
 import type { SchemeCardId, SchemeCardDefinition, PrivatePlayerProfile, PlayerData } from '../types.js';
 import { SCHEME_CARDS } from '../lib/cards.js';
@@ -45,6 +48,9 @@ const CARD_ICONS: Record<SchemeCardId, React.ReactNode> = {
   saint: <ShieldCheck className="w-4 h-4 text-yellow-300" />,
   ghost_write: <Feather className="w-4 h-4 text-indigo-400" />,
   mutiny: <Skull className="w-4 h-4 text-purple-400" />,
+  propaganda: <Megaphone className="w-4 h-4 text-sky-300" />,
+  blackmail: <Lock className="w-4 h-4 text-purple-400" />,
+  black_market: <Store className="w-4 h-4 text-amber-400" />,
 };
 
 const CARD_THEMES: Record<SchemeCardId, { border: string; bg: string; badge: string }> = {
@@ -87,6 +93,21 @@ const CARD_THEMES: Record<SchemeCardId, { border: string; bg: string; badge: str
     border: 'border-purple-800/60 hover:border-purple-500',
     bg: 'bg-purple-950/30',
     badge: 'bg-purple-900/60 text-purple-300 border-purple-700',
+  },
+  propaganda: {
+    border: 'border-sky-800/60 hover:border-sky-500',
+    bg: 'bg-sky-950/30',
+    badge: 'bg-sky-900/60 text-sky-300 border-sky-700',
+  },
+  blackmail: {
+    border: 'border-purple-800/60 hover:border-purple-500',
+    bg: 'bg-purple-950/30',
+    badge: 'bg-purple-900/60 text-purple-300 border-purple-700',
+  },
+  black_market: {
+    border: 'border-amber-800/60 hover:border-amber-500',
+    bg: 'bg-amber-950/30',
+    badge: 'bg-amber-900/60 text-amber-300 border-amber-700',
   },
 };
 
@@ -152,7 +173,7 @@ export const SchemeHandDrawer: React.FC<SchemeHandDrawerProps> = ({
               <Layers className="w-4 h-4 text-amber-500" />
               <span>YOUR SCHEME HAND</span>
               <span className="px-1.5 py-0.5 text-[10px] rounded bg-[#162338] text-amber-400 border border-[#273a57]">
-                {hand.length} / 5
+                {hand.length} / {hand.length}
               </span>
               {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
             </button>

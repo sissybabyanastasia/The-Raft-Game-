@@ -89,6 +89,39 @@ export const SCHEME_CARDS: Record<SchemeCardId, SchemeCardDefinition> = {
     requiresTarget: false,
     isPublic: false,
   },
+  propaganda: {
+    id: 'propaganda',
+    name: 'Propaganda',
+    timing: 'scavenge',
+    costStash: 0,
+    costEnergy: 0,
+    effect: 'Launch a campaign of self-aggrandizement. Gain +3 reputation publicly.',
+    flavor: 'A well-crafted story makes a lazy afternoon look like heroic watchkeeping.',
+    requiresTarget: false,
+    isPublic: true,
+  },
+  blackmail: {
+    id: 'blackmail',
+    name: 'Blackmail',
+    timing: 'resolution',
+    costStash: 1,
+    costEnergy: 0,
+    effect: 'Expose a dark secret. Steal 1 Stash from target player. If they have none, they lose 3 reputation instead.',
+    flavor: 'The only thing worse than a wet hammock is a leaked ledger entry.',
+    requiresTarget: true,
+    isPublic: false,
+  },
+  black_market: {
+    id: 'black_market',
+    name: 'Black Market',
+    timing: 'scavenge',
+    costStash: 1,
+    costEnergy: 0,
+    effect: 'Barter with secretive contacts. Instantly draw 2 new Scheme cards.',
+    flavor: 'A stash coin passed in the shadow of the palm trees buys many favors.',
+    requiresTarget: false,
+    isPublic: false,
+  },
 };
 
 export const ALL_SCHEME_CARD_IDS: SchemeCardId[] = [
@@ -100,6 +133,9 @@ export const ALL_SCHEME_CARD_IDS: SchemeCardId[] = [
   'saint',
   'ghost_write',
   'mutiny',
+  'propaganda',
+  'blackmail',
+  'black_market',
 ];
 
 export function createShuffledDeck(cardCopies = 3): SchemeCardId[] {

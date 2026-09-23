@@ -189,7 +189,10 @@ export type SchemeCardId =
   | 'smokescreen'
   | 'saint'
   | 'ghost_write'
-  | 'mutiny';
+  | 'mutiny'
+  | 'propaganda'
+  | 'blackmail'
+  | 'black_market';
 
 export interface SchemeCardDefinition {
   id: SchemeCardId;

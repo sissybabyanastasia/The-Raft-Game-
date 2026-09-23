@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Scroll, CheckCircle, Vote, Award, ShieldAlert, ArrowRight, Check } from 'lucide-react';
 import type { GameData, PlayerData, ConstitutionClauseId } from '../types.js';
 import { CONSTITUTION_CLAUSES } from '../lib/constitution.js';
+import { ConfirmSkipModal } from './ConfirmSkipModal.js';
 
 interface FoundingPhaseViewProps {
   game: GameData;
@@ -27,6 +28,7 @@ export const FoundingPhaseView: React.FC<FoundingPhaseViewProps> = ({
   const myVotes = founding?.votes?.[currentUserId] || {};
 
   const [selectedChoices, setSelectedChoices] = useState<Record<string, 'A' | 'B'>>({});
+  const [isConfirmSkipOpen, setIsConfirmSkipOpen] = useState<boolean>(false);
 
   const handleSelect = (clauseId: ConstitutionClauseId, choice: 'A' | 'B') => {
     setSelectedChoices((prev) => ({ ...prev, [clauseId]: choice }));
@@ -172,9 +174,9 @@ export const FoundingPhaseView: React.FC<FoundingPhaseViewProps> = ({
           {isHost && (
             <button
               id="ratify-constitution-btn"
-              onClick={onResolveFounding}
+              onClick={() => setIsConfirmSkipOpen(true)}
               disabled={isLoading}
-              className="w-full sm:w-auto px-6 py-3 rounded font-mono font-bold text-sm tracking-wider uppercase bg-[#ea580c] hover:bg-[#c2410c] text-white disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg transition-colors"
+              className="w-full sm:w-auto px-6 py-3 rounded font-mono font-bold text-sm tracking-wider uppercase bg-[#ea580c] hover:bg-[#c2410c] text-white disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg transition-colors cursor-pointer"
             >
               <Scroll className="w-4 h-4" />
               Ratify & Call First Election
@@ -182,6 +184,24 @@ export const FoundingPhaseView: React.FC<FoundingPhaseViewProps> = ({
           )}
         </div>
       </div>
+
+      {/* Shared Host Skip Timer Confirmation Modal */}
+      <ConfirmSkipModal
+        isOpen={isConfirmSkipOpen}
+        onClose={() => setIsConfirmSkipOpen(false)}
+        onConfirm={onResolveFounding}
+        title="Ratify Constitution Early?"
+        description="Are you sure you want to ratify the constitution now? Any active players who haven't finished voting on all clauses will have their choices randomized/defaulted."
+        awaitingCount={(() => {
+          const activeNonBots = players.filter((p: any) => !p.isBot && p.status !== 'marooned' && p.status !== 'abandoned');
+          const votes = founding?.votes || {};
+          return activeNonBots.filter(p => {
+            const pVotes = votes[p.id];
+            return !pVotes || Object.keys(pVotes).length < drawnClauses.length;
+          }).length;
+        })()}
+        awaitingLabel="human players who haven't completed their constitutional ballots"
+      />
     </div>
   );
 };

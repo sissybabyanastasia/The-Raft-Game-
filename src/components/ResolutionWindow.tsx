@@ -20,6 +20,7 @@ import type {
 } from '../types.js';
 import { SCHEME_CARDS } from '../lib/cards.js';
 import { CardPlayModal } from './CardPlayModal.js';
+import { ConfirmSkipModal } from './ConfirmSkipModal.js';
 
 interface ResolutionWindowProps {
   game: GameData;
@@ -32,7 +33,7 @@ interface ResolutionWindowProps {
   isLoading: boolean;
 }
 
-const RESOLUTION_TOTAL_MS = 75000; // 75 seconds (3x standing timer for multi-device review)
+const RESOLUTION_TOTAL_MS = 300000; // 5 minutes standard timer (upgraded from 75 seconds)
 
 export const ResolutionWindow: React.FC<ResolutionWindowProps> = ({
   game,
@@ -47,6 +48,7 @@ export const ResolutionWindow: React.FC<ResolutionWindowProps> = ({
   const closesAt = roundData?.resolutionWindowClosesAt || Date.now() + RESOLUTION_TOTAL_MS;
   const [timeLeftMs, setTimeLeftMs] = useState<number>(() => Math.max(0, closesAt - Date.now()));
   const [selectedCardId, setSelectedCardId] = useState<SchemeCardId | null>(null);
+  const [isConfirmSkipOpen, setIsConfirmSkipOpen] = useState<boolean>(false);
 
   const isWindowActive =
     timeLeftMs > 0 &&
@@ -113,23 +115,6 @@ export const ResolutionWindow: React.FC<ResolutionWindowProps> = ({
         <div className="flex items-center gap-2 text-xs font-bold text-amber-400 uppercase tracking-widest">
           <Zap className="w-4 h-4 text-amber-500 animate-pulse" />
           <span>RESOLUTION WINDOW — THE DUSK RESOLUTION</span>
-        </div>
-
-        {/* Timer Display */}
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#141e30] border border-[#2b3e5c] text-slate-100 font-mono">
-          <Clock className="w-4 h-4 text-amber-400 animate-spin" style={{ animationDuration: '4s' }} />
-          <span className="text-xs text-slate-400">{isWindowActive ? 'Locking in:' : 'Status:'}</span>
-          <span
-            className={`text-base font-black ${
-              !isWindowActive
-                ? 'text-amber-300 text-xs'
-                : seconds <= 5
-                ? 'text-rose-400 animate-pulse'
-                : 'text-amber-400'
-            }`}
-          >
-            {isWindowActive ? formattedTime : 'Tallies locking in...'}
-          </span>
         </div>
       </div>
 
@@ -224,23 +209,42 @@ export const ResolutionWindow: React.FC<ResolutionWindowProps> = ({
       </div>
 
       {/* Active Resolution Submissions Status */}
-      <div className="pt-4 border-t border-[#1b283d] flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
+      <div className="pt-4 border-t border-[#1b283d] flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-400">
         <div className="flex items-center gap-2">
-          <EyeOff className="w-4 h-4 text-slate-500" />
+          <EyeOff className="w-4 h-4 text-slate-500 shrink-0" />
           <span>Cards played in Resolution are resolved secretly during overnight tallies.</span>
         </div>
 
-        {currentPlayer.isHost && (
-          <button
-            type="button"
-            onClick={onFinalize}
-            disabled={isLoading || roundData?.resolving || roundData?.resolved}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#1b293e] hover:bg-[#253956] text-slate-200 text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <span>Skip Timer & Tally Now</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          {/* Timer Display */}
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#141e30] border border-[#2b3e5c] text-slate-100 font-mono">
+            <Clock className="w-3.5 h-3.5 text-amber-400 animate-spin" style={{ animationDuration: '4s' }} />
+            <span className="text-[10px] text-slate-400 uppercase tracking-wider">{isWindowActive ? 'Locking in:' : 'Status:'}</span>
+            <span
+              className={`text-xs font-bold font-mono ${
+                !isWindowActive
+                  ? 'text-amber-300'
+                  : seconds <= 5
+                  ? 'text-rose-400 animate-pulse'
+                  : 'text-amber-400'
+              }`}
+            >
+              {isWindowActive ? formattedTime : 'Tallies locking...'}
+            </span>
+          </div>
+
+          {currentPlayer.isHost && (
+            <button
+              type="button"
+              onClick={() => setIsConfirmSkipOpen(true)}
+              disabled={isLoading || roundData?.resolving || roundData?.resolved}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#1b293e] hover:bg-[#253956] text-slate-200 text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer font-bold font-mono uppercase tracking-wider"
+            >
+              <span>Skip Timer & Tally Now</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Card Confirmation Modal */}
@@ -255,6 +259,21 @@ export const ResolutionWindow: React.FC<ResolutionWindowProps> = ({
         isWindowActive={isWindowActive}
         hasPlayedCardThisRound={hasPlayedCardThisRound}
         isLoading={isLoading}
+      />
+
+      {/* Shared Host Skip Timer Confirmation Modal */}
+      <ConfirmSkipModal
+        isOpen={isConfirmSkipOpen}
+        onClose={() => setIsConfirmSkipOpen(false)}
+        onConfirm={onFinalize}
+        title="Skip Resolution Timer?"
+        description="Are you sure you want to end the Resolution phase early? Any players wishing to play secret scheme cards will lose their opportunity."
+        awaitingCount={(() => {
+          const activeNonBots = players.filter((p: any) => !p.isBot && p.status !== 'marooned' && p.status !== 'abandoned');
+          const playedIds = new Set((roundData?.cardsPlayed || []).map((c: any) => c.playerId));
+          return activeNonBots.filter(p => !playedIds.has(p.id)).length;
+        })()}
+        awaitingLabel="human players who haven't played a resolution card yet"
       />
     </div>
   );

@@ -56,7 +56,7 @@ export const ARCHETYPES: Record<Archetype, ArchetypeDetails> = {
     tagline: 'Perception is the only seaworthy vessel.',
     flavorText: '"Perception is seaworthiness. You don\'t build the raft; you build the consensus."',
     passiveTitle: 'Charismatic Spin',
-    passiveDesc: 'Claimed contributions grant +1 Reputation each round even if false.',
+    passiveDesc: 'Contributions grant +1 Reputation each round even if false.',
     activeTitle: 'Public Endorsement',
     activeDesc: 'Publicly endorse one castaway, transferring 2 Reputation to them to cement an alliance.',
     buttonLabel: 'Endorse',

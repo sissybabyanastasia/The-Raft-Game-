@@ -122,7 +122,7 @@ export const PrivateDossierDrawer: React.FC<PrivateDossierDrawerProps> = ({
             <div className="p-3 rounded-lg bg-[#111928] border border-[#1e2a3c]">
               <span className="text-[10px] text-slate-400 uppercase block">Schemes In Hand</span>
               <div className="text-xl font-black text-slate-200 mt-0.5">
-                {profile?.hand?.length || 0} / 5
+                {profile?.hand?.length || 0} / {profile?.hand?.length || 0}
               </div>
             </div>
           </div>

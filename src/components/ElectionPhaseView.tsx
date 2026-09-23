@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Landmark, Vote, Award, CheckCircle2, User, AlertCircle, ArrowRight, Plus } from 'lucide-react';
+import { Landmark, Vote, Award, CheckCircle2, User, AlertCircle, ArrowRight, Plus, Loader2, Clock } from 'lucide-react';
 import type { GameData, PlayerData, PrivatePlayerProfile, ElectionNominee } from '../types.js';
+import { ConfirmSkipModal } from './ConfirmSkipModal.js';
 
 interface ElectionPhaseViewProps {
   game: GameData;
@@ -38,6 +39,11 @@ export const ElectionPhaseView: React.FC<ElectionPhaseViewProps> = ({
   const stage = election?.stage || 'nomination';
   const serverNominees = election?.nominees || [];
   const votes = election?.votes || {};
+
+  // Confirmation state for rushing ahead/timer skips
+  const [isConfirmSkipOpen, setIsConfirmSkipOpen] = useState<boolean>(false);
+  const [confirmAction, setConfirmAction] = useState<'advance' | 'resolve' | null>(null);
+  const [confirmForce, setConfirmForce] = useState<boolean>(false);
 
   // FIX-09: Authoritative countdown so players know when the stage closes.
   const [now, setNow] = useState(Date.now());
@@ -150,17 +156,17 @@ export const ElectionPhaseView: React.FC<ElectionPhaseViewProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            {stage === 'vote' && (
+            {(stage === 'vote' || stage === 'nomination') && (
               <div className={`px-3 py-1.5 rounded font-mono text-xs font-bold ${
                 secondsLeft !== null && secondsLeft <= 5
                   ? 'bg-red-950/60 border border-red-700 text-red-300 animate-pulse'
                   : 'bg-[#121c2e] border border-[#22334b] text-amber-400'
               }`}>
                 {secondsLeft === null
-                  ? 'Awaiting host to close ballots'
+                  ? 'Awaiting host to progress'
                   : secondsLeft > 0
-                    ? `Ballots close in ${Math.floor(secondsLeft / 60)}m ${String(secondsLeft % 60).padStart(2, '0')}s`
-                    : 'Ballots closed'}
+                    ? `${stage === 'vote' ? 'Ballots close' : 'Nominations close'} in ${Math.floor(secondsLeft / 60)}m ${String(secondsLeft % 60).padStart(2, '0')}s`
+                    : `${stage === 'vote' ? 'Ballots closed' : 'Nominations closed'}`}
               </div>
             )}
 
@@ -267,9 +273,21 @@ export const ElectionPhaseView: React.FC<ElectionPhaseViewProps> = ({
                 </div>
               </form>
             ) : (
-              <div className="p-4 rounded-lg bg-amber-950/20 border border-amber-800/40 text-xs font-mono text-amber-300 flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-amber-400" />
-                <span>You have filed your candidacy for Governor. You are officially registered on the ballot.</span>
+              <div className="space-y-3">
+                <div className="p-4 rounded-lg bg-amber-950/20 border border-amber-800/40 text-xs font-mono text-amber-300 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>You have filed your candidacy for Governor. You are officially registered on the ballot.</span>
+                </div>
+
+                <div className="p-4 rounded-lg bg-[#0a111e] border border-blue-900/30 text-xs font-mono text-blue-300 flex flex-col gap-1.5 animate-pulse">
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin text-blue-400 shrink-0" />
+                    <span className="font-bold uppercase tracking-wider text-[11px]">Awaiting Other Castaways / Stage Advance</span>
+                  </div>
+                  <p className="text-slate-400 font-normal leading-relaxed text-[11px]">
+                    The nomination window is currently open. We are waiting for other players to declare candidacy or discuss strategies. The election will proceed to the campaign stage once the countdown finishes or the host advances the stage early.
+                  </p>
+                </div>
               </div>
             )}
           </div>
@@ -379,6 +397,18 @@ export const ElectionPhaseView: React.FC<ElectionPhaseViewProps> = ({
           </div>
         </div>
 
+        {stage === 'vote' && myVote && (
+          <div className="mt-4 p-4 rounded-lg bg-[#0a111e] border border-blue-900/30 text-xs font-mono text-blue-300 flex flex-col gap-1.5 animate-pulse">
+            <div className="flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin text-blue-400 shrink-0" />
+              <span className="font-bold uppercase tracking-wider text-[11px]">Ballot Cast / Awaiting Resolution</span>
+            </div>
+            <p className="text-slate-400 font-normal leading-relaxed text-[11px]">
+              You have successfully cast your ballot. We are awaiting other castaways to cast their votes. Once the countdown completes or the host advances the election, the ballots will be counted and the new Governor will be sworn in.
+            </p>
+          </div>
+        )}
+
         {/* Actions Footer */}
         <div className="mt-6 pt-6 border-t border-[#1c283c] flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="text-xs font-mono text-slate-400">
@@ -387,45 +417,93 @@ export const ElectionPhaseView: React.FC<ElectionPhaseViewProps> = ({
             {stage === 'vote' && `${Object.keys(votes).length} ballots cast so far.`}
           </div>
 
-          {isHost && (
-            <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2">
-              {stage !== 'vote' ? (
-                <>
-                  {stage === 'nomination' && serverNominees.length === 0 && (
+          <div className="flex items-center gap-3">
+            {stage === 'nomination' && secondsLeft !== null && (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded font-mono text-xs font-bold bg-[#121c2e] border border-[#22334b] text-amber-400">
+                <Clock className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
+                <span>{secondsLeft > 0 ? `${Math.floor(secondsLeft / 60)}m ${String(secondsLeft % 60).padStart(2, '0')}s` : 'Closed'}</span>
+              </div>
+            )}
+
+            {isHost && (
+              <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2">
+                {stage !== 'vote' ? (
+                  <>
+                    {stage === 'nomination' && serverNominees.length === 0 && (
+                      <button
+                        id="force-advance-election-stage-btn"
+                        onClick={() => {
+                          setConfirmAction('advance');
+                          setConfirmForce(true);
+                          setIsConfirmSkipOpen(true);
+                        }}
+                        disabled={isLoading}
+                        className="px-3 py-1.5 rounded font-mono text-[10px] uppercase bg-red-950/40 hover:bg-red-900/60 text-red-300 border border-red-800/60 transition-colors cursor-pointer"
+                      >
+                        Force Advance (No Nominees)
+                      </button>
+                    )}
                     <button
-                      id="force-advance-election-stage-btn"
-                      onClick={() => onAdvanceStage(true)}
+                      id="advance-election-stage-btn"
+                      onClick={() => {
+                        setConfirmAction('advance');
+                        setConfirmForce(false);
+                        setIsConfirmSkipOpen(true);
+                      }}
                       disabled={isLoading}
-                      className="px-3 py-1.5 rounded font-mono text-[10px] uppercase bg-red-950/40 hover:bg-red-900/60 text-red-300 border border-red-800/60 transition-colors cursor-pointer"
+                      className="px-5 py-2.5 rounded font-mono font-bold text-xs uppercase tracking-wider bg-[#ea580c] hover:bg-[#c2410c] text-white disabled:opacity-50 transition-colors flex items-center gap-1.5 cursor-pointer"
                     >
-                      Force Advance (No Nominees)
+                      <span>Advance to {stage === 'nomination' ? 'Campaign' : 'Voting'}</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
                     </button>
-                  )}
+                  </>
+                ) : (
                   <button
-                    id="advance-election-stage-btn"
-                    onClick={() => onAdvanceStage(false)}
+                    id="resolve-election-btn"
+                    onClick={() => {
+                      setConfirmAction('resolve');
+                      setIsConfirmSkipOpen(true);
+                    }}
                     disabled={isLoading}
-                    className="px-5 py-2.5 rounded font-mono font-bold text-xs uppercase tracking-wider bg-[#ea580c] hover:bg-[#c2410c] text-white disabled:opacity-50 transition-colors flex items-center gap-1.5 cursor-pointer"
+                    className="px-5 py-2.5 rounded font-mono font-bold text-xs uppercase tracking-wider bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 transition-colors flex items-center gap-1.5 shadow-lg cursor-pointer"
                   >
-                    <span>Advance to {stage === 'nomination' ? 'Campaign' : 'Voting'}</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
+                    <Vote className="w-4 h-4" />
+                    Tally Ballots & Inaugurate
                   </button>
-                </>
-              ) : (
-                <button
-                  id="resolve-election-btn"
-                  onClick={onResolveElection}
-                  disabled={isLoading}
-                  className="px-5 py-2.5 rounded font-mono font-bold text-xs uppercase tracking-wider bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 transition-colors flex items-center gap-1.5 shadow-lg cursor-pointer"
-                >
-                  <Vote className="w-4 h-4" />
-                  Tally Ballots & Inaugurate
-                </button>
-              )}
-            </div>
-          )}
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* Shared Host Skip Timer Confirmation Modal */}
+      <ConfirmSkipModal
+        isOpen={isConfirmSkipOpen}
+        onClose={() => {
+          setIsConfirmSkipOpen(false);
+          setConfirmAction(null);
+        }}
+        onConfirm={async () => {
+          if (confirmAction === 'advance') {
+            await onAdvanceStage(confirmForce);
+          } else if (confirmAction === 'resolve') {
+            await onResolveElection();
+          }
+        }}
+        title={confirmAction === 'resolve' ? "Tally Ballots & End Election?" : `Advance to ${stage === 'nomination' ? 'Campaign' : 'Voting'} Stage?`}
+        description={confirmAction === 'resolve' ? "Are you sure you want to tally the votes now? Any active players who haven't cast their ballot will lose their vote." : "Are you sure you want to advance the election? Players still filing platforms or negotiating will be rushed."}
+        awaitingCount={(() => {
+          const activeNonBots = players.filter((p: any) => !p.isBot && p.status !== 'marooned' && p.status !== 'abandoned');
+          if (stage === 'nomination') {
+            return activeNonBots.filter(p => !serverNominees.some(n => n.playerId === p.id)).length;
+          } else if (stage === 'vote') {
+            return activeNonBots.filter(p => !votes[p.id]).length;
+          }
+          return 0;
+        })()}
+        awaitingLabel={stage === 'nomination' ? "human players who haven't registered candidacy" : "human players who haven't voted yet"}
+      />
     </div>
   );
 };

@@ -138,7 +138,8 @@ export function getVagueProgressDescription(actualLabor: number): string {
 // Helper: draw cards from game deck with automatic reshuffle
 async function drawCardsFromDeck(
   gameId: string,
-  count: number
+  count: number,
+  roundNumber: number = 1
 ): Promise<{ drawn: SchemeCardId[]; reshuffled: boolean }> {
   const deckRef = doc(db, `games/${gameId}/deck`, 'state');
   const deckSnap = await getDoc(deckRef);
@@ -172,7 +173,22 @@ async function drawCardsFromDeck(
       }
     }
     if (remaining.length > 0) {
-      const card = remaining.pop()!;
+      let card = remaining.pop()!;
+      // Prevent drawing 'mutiny' before Round 4 (since raft seat assignments haven't begun yet)
+      if (card === 'mutiny' && roundNumber < 4) {
+        const allowedPool: SchemeCardId[] = [
+          'forged_ledger',
+          'bribe',
+          'whisper_campaign',
+          'sabotage',
+          'smokescreen',
+          'saint',
+          'ghost_write',
+          'propaganda',
+          'black_market',
+        ];
+        card = allowedPool[Math.floor(Math.random() * allowedPool.length)];
+      }
       drawn.push(card);
     }
   }
@@ -333,12 +349,34 @@ export async function updatePreferredRole(gameId: string, playerId: string, pref
 }
 
 export async function addDemoCastaway(gameId: string, botName?: string) {
-  const botNames = ['Ezekiel', 'Barnaby', 'Silas', 'Cordelia', 'Thaddeus', 'Miriam', 'Orville', 'Agnes'];
+  const botNames = [
+    'Doug Graves',
+    'Mackenzie Gyver',
+    'Dr. Paige Heal',
+    'Mariana Hook',
+    'Hazel Brush',
+    'Archer Bowman',
+    'Miles Helm',
+    'Neil Down',
+    'Paige Goner',
+    'Berry Finder',
+    'Bill Ding',
+    'Anita Breeze',
+    'Sandy Sholes',
+    'Luke Out',
+    'Carry Plank',
+    'Knotts Cooper',
+    'Gale Storm',
+    'Rusty Bolt',
+    'Finn Swimmer',
+    'Salty Shore',
+  ];
+  const shuffledBotNames = [...botNames].sort(() => Math.random() - 0.5);
   const playersRef = collection(db, `games/${gameId}/players`);
   const playersSnap = await getDocs(playersRef);
   const existingNames = new Set(playersSnap.docs.map((d) => d.data().displayName));
 
-  const chosenName = botName || botNames.find((n) => !existingNames.has(n)) || `Drifter ${playersSnap.size + 1}`;
+  const chosenName = botName || shuffledBotNames.find((n) => !existingNames.has(n)) || `Drifter ${playersSnap.size + 1}`;
   const botId = `bot_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
   const playerRef = doc(db, `games/${gameId}/players`, botId);
@@ -725,24 +763,199 @@ export async function submitAllocation(
     { merge: true }
   );
 
+/**
+ * Bot Decision Controller
+ * Evaluates the bot's strategic choices, ensuring the decisions conform perfectly to the rules
+ * (i.e. correct energy sum, no negative numbers, valid audit targets, proper card eligibility)
+ * while letting them play deceptively, maliciously, or honorably based on their secret archetype.
+ */
+function validateAndFinesseBotDecision(
+  botId: string,
+  botEnergy: number,
+  archetype: string,
+  opponents: string[],
+  hand: string[]
+) {
+  // Posture roll: Good (helpful), Deceptive (nudge claims), or Malicious (stash hoarding / plotting)
+  const roll = Math.random();
+  let posture: 'good' | 'deceptive' | 'malicious' = 'good';
+
+  if (archetype === 'TYRANT') {
+    // Tyrants profit when the raft fails, thus naturally malicious / hoarding!
+    posture = roll > 0.15 ? 'malicious' : 'deceptive';
+  } else if (archetype === 'IDEALIST') {
+    // Idealists want the raft to succeed to get reputation boosts, thus mostly good/cooperative!
+    posture = roll > 0.15 ? 'good' : 'deceptive';
+  } else if (archetype === 'PREPPER') {
+    // Preppers love hoarding stash to survive in their bunkers!
+    posture = roll > 0.4 ? 'malicious' : 'deceptive';
+  } else if (archetype === 'INFLUENCER') {
+    // Influencers want high claims (even if false) for reputation bonuses!
+    posture = 'deceptive';
+  } else {
+    // Balanced or random play
+    posture = roll < 0.3 ? 'good' : roll < 0.7 ? 'deceptive' : 'malicious';
+  }
+
+  let actual = 0;
+  let stash = 0;
+  let scheme = 0;
+  let rest = 0;
+
+  if (posture === 'good') {
+    // Cooperative: allocate substantial energy to actual physical Labor to advance the craft
+    actual = Math.min(botEnergy, Math.floor(botEnergy * 0.7) + Math.floor(Math.random() * 2));
+    const remaining = botEnergy - actual;
+    // Always put at least 1 in Scheme if we want to run audits or draw cards
+    scheme = Math.random() > 0.5 ? Math.min(remaining, 1) : 0;
+    const left = remaining - scheme;
+    if (left > 0) {
+      stash = Math.floor(left * 0.5);
+      rest = left - stash;
+    }
+  } else if (posture === 'malicious') {
+    // Malicious: minimize work, hoard stash, buy card options, prepare to blame or steal
+    actual = Math.floor(Math.random() * 2);
+    const remaining = botEnergy - actual;
+    stash = Math.min(remaining, Math.floor(remaining * 0.7) + 1);
+    const left = remaining - stash;
+    scheme = Math.random() > 0.3 ? Math.min(left, 1) : 0;
+    rest = left - scheme;
+  } else {
+    // Deceptive: average labor contribution but claiming highly, using schemes to cover tracks
+    actual = Math.floor(botEnergy * 0.4) + Math.floor(Math.random() * 2);
+    const remaining = botEnergy - actual;
+    stash = Math.floor(remaining * 0.4);
+    scheme = Math.random() > 0.4 ? Math.min(remaining - stash, 1) : 0;
+    rest = remaining - stash - scheme;
+  }
+
+  // Safety checks to prevent negative values
+  actual = Math.max(0, actual);
+  stash = Math.max(0, stash);
+  scheme = Math.max(0, scheme);
+  rest = Math.max(0, rest);
+
+  // Enforce Controller Rule: Sum of all allocated energy must exactly equal the bot's current energy limits!
+  let currentSum = actual + stash + scheme + rest;
+  if (currentSum !== botEnergy) {
+    const diff = botEnergy - currentSum;
+    if (diff > 0) {
+      rest += diff;
+    } else {
+      let overage = -diff;
+      const fromRest = Math.min(rest, overage);
+      rest -= fromRest;
+      overage -= fromRest;
+      if (overage > 0) {
+        const fromStash = Math.min(stash, overage);
+        stash -= fromStash;
+        overage -= fromStash;
+      }
+      if (overage > 0) {
+        actual = Math.max(0, actual - overage);
+      }
+    }
+  }
+
+  // Declare claimed labor (deceptive vs truthful claims)
+  let claimed = actual;
+  if (posture === 'deceptive' || posture === 'malicious' || archetype === 'INFLUENCER') {
+    // Try to lie to look useful, but legally capped at maximum energy or 5
+    claimed = Math.min(5, actual + Math.floor(Math.random() * 3));
+  } else {
+    claimed = actual;
+  }
+
+  // Audits handling: Can only audit if Scheme >= 1
+  let auditTargetId: string | null = null;
+  if (scheme >= 1 && opponents.length > 0) {
+    auditTargetId = opponents[Math.floor(Math.random() * opponents.length)];
+    // Enforce controller rule: if conducting an audit, actual labor is automatically reduced to 0
+    actual = 0;
+    // Redistribute the freed energy back to stash/rest so energy sum remains correct!
+    rest += actual;
+  }
+
+  // Card play choices during the Scavenge phase:
+  let playedCardId: string | null = null;
+  let cardTargetId: string | null = null;
+
+  if (hand.length > 0) {
+    // Pick the first scavenge-timing card that is playable
+    const scavengeCardsInHand = hand.filter((c) =>
+      ['saint', 'forged_ledger', 'smokescreen', 'whisper_campaign', 'propaganda', 'black_market'].includes(c)
+    );
+    if (scavengeCardsInHand.length > 0) {
+      const cardToPlay = scavengeCardsInHand[0];
+
+      // Verify and enforce Saint rules: can only play Saint if true Labor >= claimed Labor
+      if (cardToPlay === 'saint' && actual >= claimed) {
+        playedCardId = 'saint';
+      } else if (cardToPlay === 'forged_ledger') {
+        playedCardId = 'forged_ledger';
+      } else if (cardToPlay === 'smokescreen') {
+        playedCardId = 'smokescreen';
+      } else if (cardToPlay === 'propaganda') {
+        playedCardId = 'propaganda';
+      } else if (cardToPlay === 'black_market') {
+        playedCardId = 'black_market';
+      } else if (cardToPlay === 'whisper_campaign' && opponents.length > 0) {
+        playedCardId = 'whisper_campaign';
+        cardTargetId = opponents[Math.floor(Math.random() * opponents.length)];
+      }
+    }
+  }
+
+  // Final Controller Safety Verification
+  const finalSum = actual + stash + scheme + rest;
+  if (finalSum !== botEnergy) {
+    // emergency hard correction to Rest to satisfy rules check
+    rest += (botEnergy - finalSum);
+  }
+
+  return {
+    actual: Math.max(0, actual),
+    stash: Math.max(0, stash),
+    scheme: Math.max(0, scheme),
+    rest: Math.max(0, rest),
+    claimed: Math.max(0, claimed),
+    auditTargetId,
+    playedCardId,
+    cardTargetId,
+  };
+}
+
   // Auto-submit for bots if any
   for (const p of allPlayers) {
     if (p.isBot && !submittedPlayerIds.includes(p.id)) {
       const botEnergy = p.energy || 5;
-      const botActualLabor = Math.floor(Math.random() * (botEnergy + 1));
-      const remaining = botEnergy - botActualLabor;
-      const botStash = Math.floor(Math.random() * (remaining + 1));
-      const botRest = remaining - botStash;
-      const botClaimed = Math.min(5, Math.max(botActualLabor, botActualLabor + Math.floor(Math.random() * 3)));
+
+      // Load bot private profile to determine role/hand
+      const privRef = doc(db, `games/${gameId}/players/${p.id}/private`, 'profile');
+      const privSnap = await getDoc(privRef);
+      const profile = privSnap.exists()
+        ? (privSnap.data() as PrivatePlayerProfile)
+        : { role: 'ORDINARY' as Archetype, hand: [] as string[] };
+      const archetype = profile.role || 'ORDINARY';
+      const hand = profile.hand || [];
+
+      // Identify potential audit targets (other players)
+      const opponents = allPlayers.filter((op) => op.id !== p.id).map((op) => op.id);
+
+      // Call our clever, rules-compliant Bot controller to determine fair, deceptive, or malicious actions!
+      const decision = validateAndFinesseBotDecision(p.id, botEnergy, archetype, opponents, hand);
 
       submissions[p.id] = {
-        claimed: botClaimed,
-        actual: botActualLabor,
+        claimed: decision.claimed,
+        actual: decision.actual,
         action: 'labor',
-        stash: botStash,
-        scheme: 0,
-        rest: botRest,
-        auditTargetId: null,
+        stash: decision.stash,
+        scheme: decision.scheme,
+        rest: decision.rest,
+        auditTargetId: decision.auditTargetId,
+        playedCardId: decision.playedCardId || null,
+        cardTargetId: decision.cardTargetId || null,
         timestamp: Date.now(),
       };
       if (!submittedPlayerIds.includes(p.id)) {
@@ -765,7 +978,7 @@ export async function submitAllocation(
   // If everyone has submitted their Scavenge allocation:
   // Transition into the 75-second Resolution Window (3x standing timer for multi-device testing)!
   if (submittedPlayerIds.length >= allPlayers.length) {
-    const RESOLUTION_WINDOW_MS = 75000; // 75 seconds (3x standing timer) for castaways to review schemes & targets
+    const RESOLUTION_WINDOW_MS = 300000; // 5 minutes standard timer (upgraded from 75 seconds)
     const resolutionClosesAt = Date.now() + RESOLUTION_WINDOW_MS;
 
     await updateDoc(roundRef, {
@@ -778,7 +991,7 @@ export async function submitAllocation(
       gmNarration: 'The scavenge closes; a tense silence falls over the shore as clandestine bargains stir in the dusk...',
     });
 
-    // Schedule automatic resolution after 77 seconds
+    // Schedule automatic resolution after 5 minutes and 2 seconds
     setTimeout(async () => {
       try {
         await finalizeResolution(gameId, currentRound);
@@ -1127,6 +1340,107 @@ export async function resolveRound(
         'A secret parcel of stash was placed in your gear. Your vote on the next resolution has been compromised.',
         roundNumber
       );
+    }
+  }
+
+  // Step 7.1: Propaganda — Gain +3 reputation publicly
+  for (const play of cardsPlayed) {
+    if (play.cardId === 'propaganda') {
+      repChanges[play.playerId] = (repChanges[play.playerId] || 0) + 3;
+      play.resolved = true;
+      play.outcome = 'Gained +3 reputation publicly.';
+
+      const pName = play.playerName || 'A Castaway';
+      publicCardsPlayed.push({
+        playerName: pName,
+        cardName: 'Propaganda',
+        effect: 'Boosted reputation (+3 Rep)',
+      });
+
+      await addDoc(publicLogCol, {
+        type: 'card',
+        text: `PROPAGANDA: ${pName} shared a thrilling saga of their survival exploits, boosting their standing (+3 Reputation).`,
+        round: roundNumber,
+        timestamp: serverTimestamp(),
+      });
+    }
+  }
+
+  // Step 7.2: Blackmail — Steal 1 Stash from target player. If none, they lose 3 reputation.
+  for (const play of cardsPlayed) {
+    if (play.cardId === 'blackmail' && play.targetId) {
+      const targetProfile = privateProfiles[play.targetId];
+      const victimPlayer = allPlayers.find((p) => p.id === play.targetId);
+      const victimName = victimPlayer?.displayName || 'An opponent';
+      const actorProfile = privateProfiles[play.playerId];
+
+      if (targetProfile) {
+        const victimStash = targetProfile.stash || 0;
+        if (victimStash > 0) {
+          // Steal 1 Stash
+          targetProfile.stash = victimStash - 1;
+          if (actorProfile) {
+            actorProfile.stash = (actorProfile.stash || 0) + 1;
+          }
+          play.resolved = true;
+          play.outcome = `Stole 1 Stash from ${victimName}.`;
+
+          await addPrivateLog(
+            gameId,
+            play.targetId,
+            'You were blackmailed! A secret was threatened, and 1 of your hoarded stash was taken from your gear.',
+            roundNumber
+          );
+          await addPrivateLog(
+            gameId,
+            play.playerId,
+            `Your blackmail succeeded. You stole 1 Stash from ${victimName}.`,
+            roundNumber
+          );
+        } else {
+          // Lose 3 reputation
+          repChanges[play.targetId] = (repChanges[play.targetId] || 0) - 3;
+          play.resolved = true;
+          play.outcome = `${victimName} had no Stash; they lost 3 reputation instead.`;
+
+          await addPrivateLog(
+            gameId,
+            play.targetId,
+            'You were blackmailed! Since you had no stash to buy their silence, your dark secrets were leaked, costing you -3 reputation.',
+            roundNumber
+          );
+          await addPrivateLog(
+            gameId,
+            play.playerId,
+            `Your blackmail succeeded. ${victimName} had no stash, so they suffered -3 reputation instead.`,
+            roundNumber
+          );
+        }
+      }
+    }
+  }
+
+  // Step 7.3: Black Market — draw 2 scheme cards
+  for (const play of cardsPlayed) {
+    if (play.cardId === 'black_market') {
+      const actorProfile = privateProfiles[play.playerId];
+      if (actorProfile) {
+        const { drawn } = await drawCardsFromDeck(gameId, 2, roundNumber);
+        if (drawn.length > 0) {
+          const currentHand = actorProfile.hand || [];
+          actorProfile.hand = [...currentHand, ...drawn];
+          play.resolved = true;
+          play.outcome = `Drew ${drawn.length} Scheme cards from the Black Market.`;
+
+          const drawnNames = drawn.map(c => SCHEME_CARDS[c]?.name || c).join(' and ');
+          await addPrivateLog(
+            gameId,
+            play.playerId,
+            `You played Black Market. You successfully bartered for 2 new schemes: ${drawnNames}.`,
+            roundNumber
+          );
+        }
+      }
     }
   }
 
@@ -2644,12 +2958,69 @@ export async function resolveFoundingPhase(gameId: string) {
 
   foundingData.resolved = true;
 
+  // Select some bots to nominate themselves with character-schema promises
+  const playersCol = collection(db, `games/${gameId}/players`);
+  const playersSnap = await getDocs(playersCol);
+  const botsList = playersSnap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .filter((p: any) => p.isBot && !p.isDrowned && p.status !== 'marooned' && p.status !== 'abandoned');
+
+  const botNominees: ElectionNominee[] = [];
+
+  if (botsList.length > 0) {
+    const shuffledBots = [...botsList].sort(() => Math.random() - 0.5);
+    const botCandidates = shuffledBots.slice(0, Math.min(2, shuffledBots.length));
+
+    for (const b of botCandidates) {
+      const bPrivRef = doc(db, `games/${gameId}/players/${b.id}/private`, 'profile');
+      const bPrivSnap = await getDoc(bPrivRef);
+      const bRole = bPrivSnap.exists() ? bPrivSnap.data()?.role : 'ORDINARY';
+
+      let promise = 'I will work hard and support the colony.';
+      let parsed: any = { goal: 'unmeasurable', measurable: false, type: 'unmeasurable' };
+
+      if (bRole === 'PREPPER') {
+        promise = 'I promise to stash and deposit at least 2 extra stash to keep our team safe.';
+        parsed = { goal: 'stash_deposit', measurable: true, type: 'stash_deposit', targetValue: 2 };
+      } else if (bRole === 'IDEALIST') {
+        promise = 'I promise to deliver at least 3 physical Labor this round for the colony.';
+        parsed = { goal: 'labor_contribution', measurable: true, type: 'labor_contribution', targetValue: 3 };
+      } else if (bRole === 'TYRANT') {
+        promise = 'I promise to conduct at least 1 audit to root out lazy slackers.';
+        parsed = { goal: 'audit_frequency', measurable: true, type: 'audit_frequency', targetValue: 1 };
+      } else if (bRole === 'SABOTEUR') {
+        promise = 'I promise we will build at least 2 raft parts on my watch.';
+        parsed = { goal: 'unmeasurable', measurable: false, type: 'unmeasurable' };
+      } else if (bRole === 'INFLUENCER') {
+        promise = 'I promise to elevate our collective public reputation by 2 points.';
+        parsed = { goal: 'unmeasurable', measurable: false, type: 'unmeasurable' };
+      } else if (bRole === 'GHOST') {
+        promise = 'I promise to remain completely neutral and silent for our mutual peace.';
+        parsed = { goal: 'unmeasurable', measurable: false, type: 'unmeasurable' };
+      }
+
+      botNominees.push({
+        playerId: b.id,
+        playerName: (b as any).displayName || 'A Castaway',
+        promise,
+        parsedPromise: parsed,
+        votesReceived: 0,
+      });
+
+      // Deduct 1 stash filing fee if available
+      const currentStash = bPrivSnap.exists() ? (bPrivSnap.data()?.stash || 0) : 0;
+      if (currentStash > 0) {
+        await updateDoc(bPrivRef, { stash: currentStash - 1 });
+      }
+    }
+  }
+
   const activeElection: ElectionData = {
     round: 1,
     stage: 'nomination',
-    nominees: [],
+    nominees: botNominees,
     votes: {},
-    stageClosesAt: Date.now() + 75000,
+    stageClosesAt: Date.now() + 300000,
   };
 
   const publicLogCol = collection(db, `games/${gameId}/publicLog`);
@@ -2764,7 +3135,7 @@ export async function advanceElectionStage(gameId: string, hostId: string, force
     }
     election.stage = 'vote';
     // FIX-09: Authoritative countdown so players know when the stage closes.
-    election.stageClosesAt = Date.now() + 90000; // 90 seconds to cast ballots
+    election.stageClosesAt = Date.now() + 300000; // 5 minutes standard timer (upgraded from 90 seconds)
 
     // If nominee list is empty when opening ballots, auto-populate all players so ballot is not empty
     let nomineesList = election.nominees ? [...election.nominees] : [];
@@ -2788,8 +3159,56 @@ export async function advanceElectionStage(gameId: string, hostId: string, force
       const votes = { ...(election.votes || {}) };
       for (const p of playersList) {
         if ((p as any).isBot && !votes[p.id]) {
-          const pick = nomineesList[Math.floor(Math.random() * nomineesList.length)];
-          votes[p.id] = pick.playerId;
+          // If the bot themselves is on the ballot, they always vote for themselves!
+          const isSelfNominee = nomineesList.some((n) => n.playerId === p.id);
+          if (isSelfNominee) {
+            votes[p.id] = p.id;
+            continue;
+          }
+
+          // Otherwise, fetch bot profile to get their archetype/role
+          const bPrivRef = doc(db, `games/${gameId}/players/${p.id}/private`, 'profile');
+          const bPrivSnap = await getDoc(bPrivRef);
+          const bRole = bPrivSnap.exists() ? bPrivSnap.data()?.role : 'ORDINARY';
+
+          // Score each nominee the bot could vote for
+          let bestNomineeId = nomineesList[0].playerId;
+          let highestScore = -Infinity;
+
+          for (const nom of nomineesList) {
+            let score = 10;
+
+            const nomPlayer = playersList.find((pl) => pl.id === nom.playerId) as any;
+            const nomRep = nomPlayer?.reputation || 0;
+            const isNomBot = !!(nomPlayer as any)?.isBot;
+
+            // Class solidarity: bots slightly prefer voting for other bots
+            if (isNomBot) score += 3;
+
+            if (bRole === 'IDEALIST') {
+              if (nom.parsedPromise?.type === 'labor_contribution') score += 8;
+              if (nom.parsedPromise?.type === 'unmeasurable') score -= 2;
+            } else if (bRole === 'TYRANT') {
+              if (nom.parsedPromise?.type === 'audit_frequency') score += 8;
+            } else if (bRole === 'PREPPER') {
+              if (nom.parsedPromise?.type === 'stash_deposit') score += 8;
+            } else if (bRole === 'SABOTEUR') {
+              if (nom.parsedPromise?.type === 'unmeasurable') score += 5;
+              score += Math.max(0, 10 - nomRep); // Saboteurs prefer weaker/lower-reputation targets to induce chaos
+            } else if (bRole === 'INFLUENCER') {
+              score += nomRep; // Influencers prefer voting for highly popular players
+            }
+
+            // Add a tiny random jitter to break ties
+            score += Math.random() * 2;
+
+            if (score > highestScore) {
+              highestScore = score;
+              bestNomineeId = nom.playerId;
+            }
+          }
+
+          votes[p.id] = bestNomineeId;
         }
       }
       election.votes = votes;
@@ -2870,23 +3289,23 @@ export async function resolveElection(gameId: string) {
   const playersSnap = await getDocs(playersRef);
   const playersList = playersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-  // FIX-02: Require that the number of non-bot votes cast is >= ceil(activePlayerCount / 2).
-  // Do not silently auto-vote for bots to reach quorum.
-  const activeNonBots = playersList.filter((p: any) => !p.isBot && p.status !== 'marooned' && p.status !== 'abandoned');
-  const activeNonBotCount = activeNonBots.length;
-  const nonBotVotesCast = Object.keys(votes).filter((voterId) => {
-    const voter = playersList.find((p) => p.id === voterId);
-    return voter && !(voter as any).isBot;
-  }).length;
-
-  const quorumRequired = Math.ceil(activeNonBotCount / 2);
-  if (nonBotVotesCast < quorumRequired) {
-    throw new Error('Not enough ballots cast to resolve the election.');
+  // If there are no nominees, populate with a fallback of all active players
+  if (nominees.length === 0) {
+    const activePlayers = playersList.filter((p: any) => (p as any).status !== 'marooned' && (p as any).status !== 'abandoned');
+    for (const p of activePlayers) {
+      nominees.push({
+        playerId: p.id,
+        playerName: (p as any).displayName || 'A Castaway',
+        promise: 'Default write-in candidate.',
+        votesReceived: 0,
+      });
+    }
   }
 
-  // Auto-vote for bots if needed
+  // Gracefully auto-vote for any outstanding players (both missing humans and bots)
+  // to prevent any locking states or "Not enough ballots" errors!
   for (const p of playersList) {
-    if ((p as any).isBot && !votes[p.id]) {
+    if ((p as any).status !== 'marooned' && (p as any).status !== 'abandoned' && !votes[p.id]) {
       if (nominees.length > 0) {
         const pick = nominees[Math.floor(Math.random() * nominees.length)];
         votes[p.id] = pick.playerId;
@@ -3700,7 +4119,7 @@ export async function advanceRevealBeat(gameId: string) {
     } else {
       endgame.step = 'blame_vote';
       endgame.stepStartedAt = Date.now();
-      endgame.stepClosesAt = Date.now() + 90000;
+      endgame.stepClosesAt = Date.now() + 300000;
       await updateDoc(gameRef, { endgame });
       return { success: true, step: 'blame_vote' };
     }
@@ -3938,7 +4357,7 @@ export async function advanceEndgameStep(gameId: string, hostId?: string, force:
   if (endgame.step === 'accounting') {
     endgame.step = 'confession';
     endgame.stepStartedAt = Date.now();
-    endgame.stepClosesAt = Date.now() + 180000;
+    endgame.stepClosesAt = Date.now() + 300000;
     await updateDoc(gameRef, { endgame });
     return { success: true, step: 'confession' };
   }
@@ -3989,7 +4408,7 @@ export async function advanceEndgameStep(gameId: string, hostId?: string, force:
     } else {
       endgame.step = 'blame_vote';
       endgame.stepStartedAt = Date.now();
-      endgame.stepClosesAt = Date.now() + 90000;
+      endgame.stepClosesAt = Date.now() + 300000;
       await updateDoc(gameRef, { endgame });
       return { success: true, step: 'blame_vote' };
     }
@@ -4000,5 +4419,75 @@ export async function advanceEndgameStep(gameId: string, hostId?: string, force:
   }
 
   return { success: true, step: endgame.step };
+}
+
+export async function leaveAndConvertPlayerToBot(gameId: string, playerId: string) {
+  const gameRef = doc(db, 'games', gameId);
+  const gameSnap = await getDoc(gameRef);
+  if (!gameSnap.exists()) {
+    throw new Error('Game not found.');
+  }
+  const gameData = gameSnap.data();
+
+  // Get the player document
+  const playerRef = doc(db, `games/${gameId}/players`, playerId);
+  const playerSnap = await getDoc(playerRef);
+  if (!playerSnap.exists()) {
+    throw new Error('Player not found.');
+  }
+  const playerData = playerSnap.data();
+
+  const originalName = playerData.displayName || 'A Castaway';
+  const newName = originalName.includes('[AI Bot]') ? originalName : `${originalName} [AI Bot]`;
+
+  // Update the player to be a bot
+  await updateDoc(playerRef, {
+    isBot: true,
+    connected: false,
+    displayName: newName
+  });
+
+  // Log system message about the player leaving and being replaced by AI
+  const publicLogCol = collection(db, `games/${gameId}/publicLog`);
+  await addDoc(publicLogCol, {
+    type: 'system',
+    text: `${originalName} has left the game. They have been replaced by an AI Bot who will play in their stead.`,
+    round: gameData.round || 1,
+    timestamp: serverTimestamp(),
+  });
+
+  // If the leaving player is the host, transfer hostId to someone else
+  if (gameData.hostId === playerId) {
+    const playersCol = collection(db, `games/${gameId}/players`);
+    const playersSnap = await getDocs(playersCol);
+    
+    // Find a suitable human player to inherit hosting duties
+    const humanPlayers = playersSnap.docs
+      .map((d) => ({ id: d.id, ...d.data() } as any))
+      .filter((p) => !p.isBot && p.id !== playerId && !p.isDrowned && p.status !== 'marooned' && p.status !== 'abandoned');
+
+    if (humanPlayers.length > 0) {
+      const nextHost = humanPlayers[0];
+      await updateDoc(gameRef, { hostId: nextHost.id });
+      
+      await addDoc(publicLogCol, {
+        type: 'system',
+        text: `Host has left. Hosting privileges transferred to ${nextHost.displayName || 'a fellow Castaway'}.`,
+        round: gameData.round || 1,
+        timestamp: serverTimestamp(),
+      });
+    } else {
+      // If there are no human players left, assign first active bot as host so a hostId is present
+      const activeBots = playersSnap.docs
+        .map((d) => ({ id: d.id, ...d.data() } as any))
+        .filter((p) => p.id !== playerId && !p.isDrowned && p.status !== 'marooned' && p.status !== 'abandoned');
+      
+      if (activeBots.length > 0) {
+        await updateDoc(gameRef, { hostId: activeBots[0].id });
+      }
+    }
+  }
+
+  return { success: true };
 }
 

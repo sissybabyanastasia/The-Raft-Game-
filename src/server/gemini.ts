@@ -247,6 +247,15 @@ export async function generateGMNarration(params: {
     if (cardTypes.includes('bribe')) {
       cardContext += ' Clandestine barter and muffled promises exchanged hands.';
     }
+    if (cardTypes.includes('propaganda')) {
+      cardContext += ' Shameless, self-congratulatory posturing filled the camp.';
+    }
+    if (cardTypes.includes('blackmail')) {
+      cardContext += ' Devious leverage was applied, forcing secret transactions and stolen hush-money.';
+    }
+    if (cardTypes.includes('black_market')) {
+      cardContext += ' Shady trades of goods and contraband occurred behind the palm trees.';
+    }
   }
 
   const prompt = `Current Round: ${params.round}. Raft Stage: ${params.raftStage}. Active Castaways: ${params.playerCount}. Total Public Claimed Labor: ${params.claimedTotal}. True Physical Labor: ${params.actualTotal}. Context: ${contextHint}.${auditContext}${cardContext} Write exactly ONE deadpan, vivid sentence describing what occurred this round on the desolate shore.`;

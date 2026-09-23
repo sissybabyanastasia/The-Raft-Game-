@@ -57,6 +57,7 @@ export default function App() {
   const [isDossierOpen, setIsDossierOpen] = useState<boolean>(false);
   const [isConstitutionOpen, setIsConstitutionOpen] = useState<boolean>(false);
   const [isTutorialOpen, setIsTutorialOpen] = useState<boolean>(false);
+  const [isLeaveModalOpen, setIsLeaveModalOpen] = useState<boolean>(false);
   const [selectedScavengeCard, setSelectedScavengeCard] = useState<SchemeCardId | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -1002,6 +1003,37 @@ export default function App() {
     setGameId(null);
   };
 
+  const onLeaveRequest = () => {
+    if (game && game.status === 'active') {
+      setIsLeaveModalOpen(true);
+    } else {
+      handleLeaveGame();
+    }
+  };
+
+  const handleConfirmLeaveAndBotify = async () => {
+    if (!currentGameId || !currentUser) return;
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/game/leave', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          gameId: currentGameId,
+          playerId: currentUser.uid,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to leave game');
+      setIsLeaveModalOpen(false);
+      handleLeaveGame();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Find current player profile
   const myPlayer = players.find((p) => p.id === currentUser?.uid) || {
     id: currentUser?.uid || 'temp',
@@ -1043,6 +1075,60 @@ export default function App() {
         }}
         profile={myPrivateProfile}
       />
+
+      {/* Leave Game & Replace with AI Confirmation Modal */}
+      {isLeaveModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn">
+          <div className="w-full max-w-md rounded-xl bg-[#0d1421] border border-red-900/50 shadow-2xl overflow-hidden p-6 space-y-6">
+            <div className="space-y-2 text-center">
+              <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-red-950/40 border border-red-800 text-red-400 mb-2">
+                <LogOut className="w-6 h-6" />
+              </div>
+              <h2 className="font-serif font-bold text-lg text-slate-100 tracking-wide">
+                Abandon the Expedition?
+              </h2>
+              <p className="text-xs text-slate-400 font-mono">
+                YOU ARE ABOUT TO LEAVE THE MATCH
+              </p>
+            </div>
+
+            <div className="p-4 rounded-lg bg-red-950/10 border border-red-900/30 space-y-3">
+              <p className="text-xs text-red-300 leading-relaxed font-mono">
+                ⚠️ WARNING: IF YOU ABANDON DRIFTWOOD:
+              </p>
+              <ul className="text-[11px] text-slate-300 space-y-1.5 list-disc pl-4 font-sans leading-relaxed">
+                <li>
+                  You will be <strong className="text-red-200">permanently replaced by an AI Bot</strong> who will play your hand, stash, and secret alignment for the rest of the game.
+                </li>
+                <li>
+                  If you are the Host, hosting credentials will automatically hand off to another active human player.
+                </li>
+                <li>
+                  <strong className="text-red-200">You cannot return to this session.</strong> Once you disconnect, the tide washes your tracks away.
+                </li>
+              </ul>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsLeaveModalOpen(false)}
+                className="px-4 py-2 rounded font-mono text-xs text-slate-400 hover:text-slate-200 hover:bg-[#152033] border border-transparent transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmLeaveAndBotify}
+                disabled={isLoading}
+                className="px-5 py-2.5 rounded font-mono font-bold text-xs bg-red-700 hover:bg-red-600 active:bg-red-800 text-white transition-colors cursor-pointer flex items-center gap-1.5"
+              >
+                Confirm & Leave Room
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Confidential Dossier & Private Logs Drawer */}
       <PrivateDossierDrawer
@@ -1153,7 +1239,7 @@ export default function App() {
 
             <button
               id="leave-room-btn"
-              onClick={handleLeaveGame}
+              onClick={onLeaveRequest}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-[#141d2d] hover:bg-[#1e2a3f] border border-[#27374e] text-slate-400 hover:text-slate-200 transition-colors"
               title="Leave Room"
             >

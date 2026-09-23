@@ -36,6 +36,7 @@ import {
   advanceRevealBeat,
   submitBlameVote,
   resolveBlameVote,
+  leaveAndConvertPlayerToBot,
 } from './gameLogic.js';
 import {
   generateGMNarration,
@@ -671,6 +672,21 @@ apiRouter.post('/gm/epitaph', async (req: Request, res: Response) => {
   } catch {
     const epitaph = 'The island seals the record of Driftwood. Survival was bought not by harmony, but by a meticulously budgeted ration of deceit.';
     res.json({ epitaph });
+  }
+});
+
+// Leave Game & Convert Player to AI Bot Endpoint
+apiRouter.post('/game/leave', async (req: Request, res: Response) => {
+  try {
+    const { gameId, playerId } = req.body;
+    if (!gameId || !playerId) {
+      return res.status(400).json({ error: 'gameId and playerId are required' });
+    }
+    const result = await leaveAndConvertPlayerToBot(gameId, playerId);
+    res.json(result);
+  } catch (error: any) {
+    console.error('Leave game API error:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
